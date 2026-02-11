@@ -1,0 +1,28 @@
+{
+  "name": "swarm-observer",
+  "version": "0.2.0",
+  "description": "Real-time force-directed graph visualization and management UI for Claude Code agent swarms and Agent Teams",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js --dev",
+    "demo": "node server.js --demo",
+    "install-hooks": "node scripts/install.js",
+    "test": "node test/run-tests.js",
+    "test:server": "node test/server.test.js",
+    "test:smoke": "node test/smoke.js",
+    "test:all": "node test/run-tests.js --all",
+    "screenshot": "node test/screenshot.js --click",
+    "seed": "node test/seed-teams.js",
+    "seed:clean": "node test/seed-teams.js --clean",
+    "seed:refresh": "node test/seed-teams.js --refresh",
+    "restart": "node test/restart.js",
+    "restart:demo": "node test/restart.js --demo"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "puppeteer": "^23.0.0"
+  }
+}

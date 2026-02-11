@@ -1,0 +1,6 @@
+node_modules/
+*.log
+test/screenshots/*.png
+.DS_Store
+Thumbs.db
+massgis_data/

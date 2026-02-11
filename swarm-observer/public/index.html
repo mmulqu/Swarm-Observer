@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Swarm Observer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg:       #06060c;
+    --bg-panel: #0a0a14;
+    --border:   #14142a;
+    --text:     #b8b8c8;
+    --text-dim: #4a4a60;
+    --text-xdim:#2a2a3e;
+    --accent:   #06d6a0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Header */
+  #header {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0c0c18, var(--bg));
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  #header .left { display: flex; align-items: center; gap: 10px; }
+  #header .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 2.5s ease-in-out infinite;
+  }
+  #header .status-dot.paused { background: #ef476f; box-shadow: 0 0 8px #ef476f; animation: none; }
+  #header .title {
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: #d0d0dc;
+  }
+  #header .path { font-size: 10px; color: var(--text-dim); margin-left: 4px; }
+  #header .stats { display: flex; gap: 18px; font-size: 10px; color: var(--text-dim); }
+  #header .stats span { color: var(--text-xdim); }
+  #header .stats .val { font-weight: 600; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Main layout */
+  #main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Graph canvas */
+  #graph-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  #graph-container .grid-bg {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, #12122a 0.5px, transparent 0);
+    background-size: 32px 32px;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  #graph-container svg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* Controls */
+  #controls {
+    position: absolute; bottom: 14px; left: 14px;
+    display: flex; gap: 6px; z-index: 5;
+  }
+  #controls button {
+    background: #0e0e1c; border: 1px solid var(--border);
+    color: var(--text); padding: 5px 12px; border-radius: 5px;
+    font: 10px/1 'JetBrains Mono', monospace;
+    cursor: pointer; transition: border-color 0.2s;
+  }
+  #controls button:hover { border-color: #2a2a4a; }
+  #controls button.active { border-color: var(--accent); color: var(--accent); }
+
+  /* Legend */
+  #legend {
+    position: absolute; bottom: 14px; right: 14px;
+    display: flex; gap: 10px; font-size: 8px; color: var(--text-dim);
+    z-index: 5;
+  }
+  #legend .item { display: flex; align-items: center; gap: 4px; }
+  #legend .dot { width: 5px; height: 5px; border-radius: 50%; }
+
+  /* Sidebar */
+  #sidebar {
+    width: 320px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--bg-panel);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 10px 14px 6px;
+    font-size: 10px; font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.12em; text-transform: uppercase;
+    flex-shrink: 0;
+  }
+
+  /* Mailbox */
+  #mailbox {
+    flex: 0 0 auto;
+    max-height: 220px;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--border);
+  }
+  #mailbox-list { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .msg-card {
+    font-size: 11px; line-height: 1.4;
+    padding: 6px 8px; border-radius: 4px;
+    background: #08081a;
+    border: 1px solid #14142a;
+    animation: fadeSlide 0.3s ease;
+  }
+  .msg-from { font-weight: 600; }
+  .msg-arrow { color: var(--text-xdim); margin: 0 3px; }
+  .msg-body { color: var(--text-dim); margin-top: 2px; display: block; }
+
+  /* Event stream */
+  #event-stream {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #event-list { padding: 0 12px; display: flex; flex-direction: column; gap: 2px; }
+  .evt-row {
+    font-size: 11px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 0;
+    animation: fadeSlide 0.3s ease forwards;
+    transition: opacity 2s ease;
+  }
+  .evt-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .evt-agent { width: 50px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+  .evt-tool { width: 55px; flex-shrink: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+  .evt-file { flex: 1; color: var(--text-xdim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .evt-age { flex-shrink: 0; color: #1e1e30; font-size: 9px; }
+
+  /* Data sources footer */
+  #sources {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 8px; color: var(--text-xdim);
+    line-height: 1.7;
+    flex-shrink: 0;
+  }
+  #sources .label { color: var(--text-dim); font-weight: 600; margin-bottom: 2px; }
+
+  /* Agent tooltip */
+  .node-tooltip {
+    pointer-events: none;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Connection status banner */
+  #conn-banner {
+    display: none;
+    position: absolute; top: 50px; left: 50%; transform: translateX(-50%);
+    background: #1a0a0a; border: 1px solid #3a1a1a;
+    color: #ef476f; padding: 6px 16px; border-radius: 6px;
+    font-size: 10px; z-index: 20;
+  }
+  #conn-banner.show { display: block; }
+
+  @keyframes fadeSlide {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Prompt Panel */
+  .prompt-panel {
+    position: fixed;
+    bottom: 0; left: 0; right: 320px;
+    height: 400px;
+    background: #0a0a16;
+    border-top: 1px solid #1a1a3a;
+    display: flex; flex-direction: column;
+    z-index: 30;
+    transition: transform 0.3s ease, height 0.3s ease;
+    box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.6);
+  }
+  .prompt-panel.hidden { transform: translateY(100%); pointer-events: none; }
+  .prompt-panel.minimized { height: 42px; }
+  .prompt-panel.minimized #prompt-output,
+  .prompt-panel.minimized #prompt-permissions,
+  .prompt-panel.minimized .prompt-cwd-bar,
+  .prompt-panel.minimized .prompt-input-row { display: none; }
+
+  .prompt-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+    border-bottom: 1px solid #14142a;
+    flex-shrink: 0;
+    cursor: grab;
+    background: linear-gradient(180deg, #0e0e1c, #0a0a16);
+    font-size: 12px; font-weight: 600; color: #b8b8c8;
+  }
+  .prompt-header-actions { display: flex; gap: 4px; }
+  .prompt-header-actions button {
+    background: none; border: 1px solid #1a1a3a;
+    color: #5a5a70; padding: 2px 8px; border-radius: 4px;
+    font: 11px/1 'JetBrains Mono', monospace;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .prompt-header-actions button:hover { border-color: #3a3a5a; color: #b8b8c8; }
+
+  .prompt-cwd-bar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 16px;
+    background: #06060e;
+    border-bottom: 1px solid #14142a;
+    flex-shrink: 0;
+  }
+  .prompt-cwd-bar .cwd-label {
+    font-size: 10px; color: #3a3a58; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  #prompt-cwd {
+    flex: 1; background: none; border: none;
+    color: #7a7a98; padding: 4px 0;
+    font: 11px/1.2 'JetBrains Mono', monospace;
+    outline: none;
+  }
+  #prompt-cwd:focus { color: #b8b8d0; }
+  #prompt-cwd::placeholder { color: #1a1a30; }
+  #prompt-cwd-browse {
+    background: none; border: 1px solid #1a1a3a;
+    color: #4a4a60; padding: 2px 6px; border-radius: 3px;
+    font: 10px/1 'JetBrains Mono', monospace;
+    cursor: pointer; flex-shrink: 0;
+  }
+  #prompt-cwd-browse:hover { border-color: #3a3a5a; color: #8a8aa0; }
+  .cwd-dropdown {
+    position: absolute; bottom: 100%; left: 0; right: 0;
+    background: #0a0a16; border: 1px solid #1a1a3a;
+    border-radius: 4px; max-height: 150px; overflow-y: auto;
+    z-index: 50; margin-bottom: 2px;
+  }
+  .cwd-dropdown-item {
+    padding: 6px 12px; font-size: 11px; color: #7a7a98;
+    cursor: pointer; border-bottom: 1px solid #0e0e1c;
+  }
+  .cwd-dropdown-item:hover { background: #12122a; color: #b8b8d0; }
+  .cwd-dropdown-item .cwd-agent-name {
+    font-size: 9px; color: #3a3a58; display: block; margin-top: 1px;
+  }
+
+  #prompt-output {
+    flex: 1; overflow-y: auto; padding: 12px 16px;
+    font-size: 12px; line-height: 1.6; color: #b8b8c8;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #prompt-output .out-system { color: #4a4a60; }
+  #prompt-output .out-assistant { color: #c8c8d8; }
+  #prompt-output .out-tool { color: #06d6a0; font-size: 11px; }
+  #prompt-output .out-error { color: #ef476f; }
+  #prompt-output .out-user { color: #7b68ee; font-weight: 500; }
+  #prompt-output .out-status { color: #ffd166; font-style: italic; font-size: 11px; }
+
+  .prompt-permissions {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: #12122a;
+    border-top: 1px solid #1a1a3a;
+    flex-shrink: 0;
+  }
+  .prompt-permissions.hidden { display: none; }
+  .prompt-permissions #prompt-perm-text {
+    flex: 1; font-size: 11px; color: #ffd166;
+  }
+  .perm-btn {
+    padding: 4px 12px; border-radius: 4px;
+    font: 11px/1 'JetBrains Mono', monospace;
+    cursor: pointer; border: 1px solid; transition: all 0.2s;
+  }
+  .perm-yes { background: #06d6a022; border-color: #06d6a0; color: #06d6a0; }
+  .perm-yes:hover { background: #06d6a044; }
+  .perm-no { background: #ef476f22; border-color: #ef476f; color: #ef476f; }
+  .perm-no:hover { background: #ef476f44; }
+  .perm-always { background: #7b68ee22; border-color: #7b68ee; color: #7b68ee; }
+  .perm-always:hover { background: #7b68ee44; }
+
+  .prompt-input-row {
+    display: flex; gap: 8px; padding: 8px 16px;
+    border-top: 1px solid #14142a;
+    flex-shrink: 0;
+    background: #08081a;
+  }
+  #prompt-input {
+    flex: 1; background: #0e0e1c; border: 1px solid #1a1a3a;
+    color: #d0d0dc; padding: 8px 12px; border-radius: 6px;
+    font: 12px/1.4 'JetBrains Mono', monospace;
+    outline: none; transition: border-color 0.2s;
+  }
+  #prompt-input:focus { border-color: #06d6a0; }
+  #prompt-input::placeholder { color: #2a2a40; }
+  #prompt-send {
+    background: #06d6a0; border: none; color: #06060c;
+    padding: 8px 16px; border-radius: 6px;
+    font: 13px/1 'JetBrains Mono', monospace;
+    font-weight: 700; cursor: pointer; transition: all 0.2s;
+  }
+  #prompt-send:hover { background: #08e8b0; }
+  #prompt-send:disabled { background: #1a1a3a; color: #3a3a50; cursor: default; }
+
+  /* Panel Tabs */
+  .panel-tabs {
+    display: flex; gap: 0; flex-shrink: 0;
+    border-bottom: 1px solid #14142a;
+    background: #08081a;
+  }
+  .panel-tab {
+    padding: 6px 16px; font-size: 10px; font-weight: 600;
+    color: #4a4a60; cursor: pointer; border: none; background: none;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .panel-tab:hover { color: #8a8aa0; }
+  .panel-tab.active { color: #06d6a0; border-bottom-color: #06d6a0; }
+  .panel-tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .panel-tab-content.active { display: flex; }
+
+  /* Agent Context Tab */
+  .agent-context {
+    flex: 1; overflow-y: auto; padding: 0;
+    display: flex; flex-direction: column;
+  }
+  .agent-ctx-header {
+    padding: 10px 16px; border-bottom: 1px solid #14142a;
+    display: flex; align-items: center; gap: 10px;
+    background: #0c0c1a; flex-shrink: 0;
+  }
+  .agent-ctx-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .agent-ctx-name { font-size: 13px; font-weight: 600; color: #d0d0dc; }
+  .agent-ctx-role { font-size: 10px; color: #4a4a60; margin-left: auto; text-transform: uppercase; }
+  .agent-ctx-section {
+    padding: 8px 16px; border-bottom: 1px solid #0e0e20;
+  }
+  .agent-ctx-section-title {
+    font-size: 9px; color: #3a3a58; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 6px; font-weight: 600;
+  }
+  .agent-ctx-prompt {
+    font-size: 11px; color: #7a7a98; line-height: 1.5;
+    max-height: 80px; overflow-y: auto; white-space: pre-wrap;
+    background: #08081a; padding: 8px; border-radius: 4px;
+    border: 1px solid #12122a;
+  }
+  .agent-ctx-prompt.expanded { max-height: none; }
+
+  /* Inbox messages */
+  .inbox-messages {
+    flex: 1; overflow-y: auto; padding: 8px 16px;
+    display: flex; flex-direction: column; gap: 4px;
+    min-height: 60px;
+  }
+  .inbox-msg {
+    font-size: 11px; line-height: 1.4; padding: 4px 8px;
+    border-radius: 4px; animation: fadeSlide 0.3s ease;
+  }
+  .inbox-msg .inbox-from {
+    font-weight: 600; font-size: 10px; margin-right: 6px;
+  }
+  .inbox-msg .inbox-time {
+    font-size: 9px; color: #2a2a40; float: right;
+  }
+  .inbox-msg.from-self {
+    background: #7b68ee15; border-left: 2px solid #7b68ee;
+  }
+  .inbox-msg.from-other {
+    background: #06d6a010; border-left: 2px solid #1a3a30;
+  }
+  .inbox-msg.structured {
+    background: #ffd16610; border-left: 2px solid #ffd16640;
+    font-style: italic; color: #8a8a70;
+  }
+  .inbox-empty {
+    font-size: 11px; color: #2a2a40; text-align: center;
+    padding: 16px; font-style: italic;
+  }
+
+  /* Inbox send row */
+  .inbox-send-row {
+    display: flex; gap: 6px; padding: 8px 16px;
+    border-top: 1px solid #14142a;
+    flex-shrink: 0; background: #08081a;
+  }
+  .inbox-send-row input {
+    flex: 1; background: #0e0e1c; border: 1px solid #1a1a3a;
+    color: #d0d0dc; padding: 6px 10px; border-radius: 4px;
+    font: 11px/1.4 'JetBrains Mono', monospace;
+    outline: none;
+  }
+  .inbox-send-row input:focus { border-color: #7b68ee; }
+  .inbox-send-row input::placeholder { color: #2a2a40; }
+  .inbox-send-row button {
+    background: #7b68ee; border: none; color: #fff;
+    padding: 6px 12px; border-radius: 4px;
+    font: 11px/1 'JetBrains Mono', monospace;
+    font-weight: 700; cursor: pointer;
+  }
+  .inbox-send-row button:hover { background: #8b78fe; }
+
+  /* Task list in context */
+  .task-list { display: flex; flex-direction: column; gap: 4px; }
+  .task-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; padding: 4px 8px; border-radius: 4px;
+    background: #0c0c1a;
+  }
+  .task-item .task-id { color: #4a4a60; font-size: 9px; width: 20px; }
+  .task-item .task-subject { flex: 1; color: #a0a0b8; }
+  .task-status-badge {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px;
+    font-weight: 600; text-transform: uppercase;
+  }
+  .task-status-pending { background: #4a4a6020; color: #6a6a80; }
+  .task-status-in_progress { background: #06d6a020; color: #06d6a0; }
+  .task-status-completed { background: #06d6a010; color: #2a6a50; }
+  .task-status-blocked { background: #ef476f20; color: #ef476f; }
+
+  .prompt-panel.minimized .panel-tabs,
+  .prompt-panel.minimized .panel-tab-content,
+  .prompt-panel.minimized .inbox-send-row { display: none; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div class="left">
+    <div class="status-dot" id="status-dot"></div>
+    <span class="title">Swarm Observer</span>
+    <span class="path" id="team-path"></span>
+  </div>
+  <div class="stats">
+    Agents: <span class="val" id="stat-agents" style="color:#06d6a0">0</span>
+    <span>│</span>
+    Events: <span class="val" id="stat-events" style="color:#ffd166">0</span>
+    <span>│</span>
+    Tokens: <span class="val" id="stat-tokens" style="color:#7b68ee">0k</span>
+    <span>│</span>
+    Messages: <span class="val" id="stat-msgs" style="color:#118ab2">0</span>
+  </div>
+</div>
+
+<div id="conn-banner">⚠ Disconnected — retrying...</div>
+
+<!-- Main -->
+<div id="main">
+  <!-- Graph -->
+  <div id="graph-container">
+    <div class="grid-bg"></div>
+    <svg id="graph-svg"></svg>
+
+    <div id="controls">
+      <button id="btn-pause">⏸ Pause</button>
+      <button id="btn-speed">1×</button>
+      <button id="btn-reset">↻ Reset</button>
+      <button id="btn-zoom-in" title="Zoom in (+)">＋</button>
+      <button id="btn-zoom-out" title="Zoom out (−)">−</button>
+      <button id="btn-zoom-fit" title="Reset zoom (0)">⊡</button>
+      <button id="btn-new-session" style="border-color:#06d6a0;color:#06d6a0">+ New Prompt</button>
+    </div>
+
+    <div id="legend">
+      <div class="item"><div class="dot" style="background:#ffd166"></div>thinking</div>
+      <div class="item"><div class="dot" style="background:#06d6a0"></div>tool_call</div>
+      <div class="item"><div class="dot" style="background:#7b68ee"></div>writing</div>
+      <div class="item"><div class="dot" style="background:#118ab2"></div>reading</div>
+      <div class="item"><div class="dot" style="background:#ef476f"></div>blocked</div>
+      <div class="item"><div class="dot" style="background:#ffa94d"></div>delegating</div>
+      <div class="item"><div class="dot" style="background:#4a4a4a"></div>done/idle</div>
+    </div>
+  </div>
+
+  <!-- Agent Panel (slide-out from bottom — Context + Session tabs) -->
+  <div id="prompt-panel" class="prompt-panel hidden">
+    <div class="prompt-header">
+      <span id="prompt-title">🔮 Claude Session</span>
+      <div class="prompt-header-actions">
+        <button id="prompt-minimize" title="Minimize">▼</button>
+        <button id="prompt-close" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="panel-tabs" id="panel-tabs">
+      <button class="panel-tab active" data-tab="context">📋 Context</button>
+      <button class="panel-tab" data-tab="session">⚡ Session</button>
+    </div>
+
+    <!-- TAB: Agent Context -->
+    <div class="panel-tab-content active" id="tab-context">
+      <div class="agent-context" id="agent-context">
+        <div class="agent-ctx-header" id="ctx-header">
+          <div class="agent-ctx-dot" id="ctx-dot"></div>
+          <span class="agent-ctx-name" id="ctx-name">—</span>
+          <span class="agent-ctx-role" id="ctx-role"></span>
+        </div>
+        <div class="agent-ctx-section" id="ctx-prompt-section" style="display:none">
+          <div class="agent-ctx-section-title">Spawn Prompt</div>
+          <div class="agent-ctx-prompt" id="ctx-prompt"></div>
+        </div>
+        <div class="agent-ctx-section" id="ctx-tasks-section" style="display:none">
+          <div class="agent-ctx-section-title">Tasks</div>
+          <div class="task-list" id="ctx-tasks"></div>
+        </div>
+        <div class="agent-ctx-section" style="flex:1; display:flex; flex-direction:column; border-bottom:none; padding-bottom:0; overflow:hidden;">
+          <div class="agent-ctx-section-title">Inbox <span id="ctx-inbox-count" style="color:#2a2a40"></span></div>
+          <div class="inbox-messages" id="ctx-inbox"></div>
+        </div>
+      </div>
+      <div class="inbox-send-row" id="inbox-send-row">
+        <input id="inbox-input" type="text" placeholder="Message this agent…" autocomplete="off" />
+        <button id="inbox-send">Send</button>
+      </div>
+    </div>
+
+    <!-- TAB: Session (original prompt panel) -->
+    <div class="panel-tab-content" id="tab-session">
+      <div class="prompt-cwd-bar">
+        <span class="cwd-label">cwd</span>
+        <input id="prompt-cwd" type="text" spellcheck="false" placeholder="working directory…" />
+        <button id="prompt-cwd-browse" title="Pick from known agent directories">▾</button>
+      </div>
+      <div id="prompt-output"></div>
+      <div id="prompt-permissions" class="prompt-permissions hidden">
+        <span id="prompt-perm-text">Allow this tool?</span>
+        <button class="perm-btn perm-yes" data-response="y">✓ Yes</button>
+        <button class="perm-btn perm-no" data-response="n">✗ No</button>
+        <button class="perm-btn perm-always" data-response="Y">✓ Always</button>
+      </div>
+      <div class="prompt-input-row">
+        <input id="prompt-input" type="text" placeholder="Send a prompt to Claude…" autocomplete="off" />
+        <button id="prompt-send">→</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="mailbox">
+      <div class="panel-header">⚡ Mailbox</div>
+      <div id="mailbox-list"></div>
+    </div>
+
+    <div id="event-stream">
+      <div class="panel-header">📡 Event Stream</div>
+      <div id="event-list"></div>
+    </div>
+
+    <div id="sources">
+      <div class="label">DATA SOURCES</div>
+      <div>⚡ hooks → PostToolUse, PreToolUse</div>
+      <div>📋 ~/.claude/tasks/{team}/</div>
+      <div>📝 ~/.claude/projects/**/*.jsonl</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================================================================
+// STATE
+// ===================================================================
+const state = {
+  agents: new Map(),        // id -> agent data
+  events: [],               // recent events
+  messages: [],             // recent inter-agent messages
+  particles: [],            // in-flight message particles
+  links: [],                // edges between agents
+  paused: false,
+  totalEvents: 0,
+  totalTokens: 0,
+  totalMessages: 0,
+};
+
+// ===================================================================
+// D3 FORCE SIMULATION
+// ===================================================================
+const svg = d3.select("#graph-svg");
+let width = 0, height = 0;
+
+function updateDimensions() {
+  const container = document.getElementById("graph-container");
+  width = container.clientWidth;
+  height = container.clientHeight;
+  svg.attr("viewBox", `0 0 ${width} ${height}`);
+}
+updateDimensions();
+window.addEventListener("resize", () => {
+  updateDimensions();
+  if (simulation) simulation.force("center", d3.forceCenter(width / 2, height / 2)).alpha(0.3).restart();
+});
+
+// SVG groups (order = z-index) — wrapped in a zoom container
+const defs = svg.append("defs");
+const zoomG = svg.append("g").attr("class", "zoom-container");
+const gLinks = zoomG.append("g").attr("class", "links");
+const gParticles = zoomG.append("g").attr("class", "particles");
+const gNodes = zoomG.append("g").attr("class", "nodes");
+
+// Zoom behavior
+const zoom = d3.zoom()
+  .scaleExtent([0.2, 5])
+  .on("zoom", (event) => {
+    zoomG.attr("transform", event.transform);
+  });
+svg.call(zoom);
+
+// Zoom controls (keyboard)
+document.addEventListener("keydown", (e) => {
+  if (e.key === "=" || e.key === "+") {
+    svg.transition().duration(300).call(zoom.scaleBy, 1.3);
+  } else if (e.key === "-") {
+    svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+  } else if (e.key === "0") {
+    svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+  }
+});
+
+// Glow filter template
+function ensureGlowFilter(id, stdDev) {
+  if (defs.select(`#${id}`).empty()) {
+    const f = defs.append("filter").attr("id", id)
+      .attr("x", "-80%").attr("y", "-80%").attr("width", "260%").attr("height", "260%");
+    f.append("feGaussianBlur").attr("stdDeviation", stdDev).attr("result", "blur");
+    const merge = f.append("feMerge");
+    merge.append("feMergeNode").attr("in", "blur");
+    merge.append("feMergeNode").attr("in", "SourceGraphic");
+  }
+}
+ensureGlowFilter("glow-soft", 4);
+ensureGlowFilter("glow-med", 10);
+ensureGlowFilter("glow-strong", 18);
+ensureGlowFilter("glow-edge", 3);
+
+let simulation = d3.forceSimulation([])
+  .force("link", d3.forceLink([]).id(d => d.id).distance(200).strength(0.15))
+  .force("charge", d3.forceManyBody().strength(-800))
+  .force("center", d3.forceCenter(width / 2, height / 2).strength(0.03))
+  .force("collision", d3.forceCollide().radius(d => nodeRadius(d.role) + 40).strength(1))
+  .force("x", d3.forceX(width / 2).strength(0.01))
+  .force("y", d3.forceY(height / 2).strength(0.01))
+  .alphaDecay(0.02)
+  .on("tick", renderTick);
+
+// ===================================================================
+// STATUS HELPERS
+// ===================================================================
+function statusColor(s) {
+  const map = {
+    thinking: "#ffd166", tool_call: "#06d6a0", writing: "#7b68ee",
+    reading: "#118ab2", blocked: "#ef476f", done: "#4a4a5a",
+    starting: "#ffa94d", delegating: "#ffa94d", idle: "#20203a",
+  };
+  return map[s] || "#20203a";
+}
+function isActive(s) {
+  return ["thinking", "tool_call", "writing", "reading", "delegating", "starting"].includes(s);
+}
+function nodeRadius(role) {
+  return role === "lead" ? 30 : role === "worker" ? 22 : 15;
+}
+function glowFilter(s) {
+  if (s === "blocked") return "url(#glow-med)";
+  if (isActive(s)) return "url(#glow-strong)";
+  return "url(#glow-soft)";
+}
+
+// ===================================================================
+// RENDER
+// ===================================================================
+function renderTick() {
+  // Update links
+  gLinks.selectAll("line")
+    .attr("x1", d => d.source.x)
+    .attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x)
+    .attr("y2", d => d.target.y);
+
+  // Update nodes
+  gNodes.selectAll("g.node")
+    .attr("transform", d => `translate(${d.x},${d.y})`);
+
+  // Update particles
+  renderParticles();
+}
+
+function rebuildGraph() {
+  const nodes = Array.from(state.agents.values());
+  const links = state.links.filter(l =>
+    state.agents.has(l.source?.id || l.source) && state.agents.has(l.target?.id || l.target)
+  );
+
+  // Pin first lead agent to center
+  const lead = nodes.find(n => n.role === "lead");
+  if (lead && !lead._pinned) {
+    lead.fx = width / 2;
+    lead.fy = height / 2;
+    lead._pinned = true;
+  }
+
+  // -- LINKS --
+  const linkSel = gLinks.selectAll("line").data(links, d => `${d.source?.id || d.source}-${d.target?.id || d.target}`);
+  linkSel.exit().transition().duration(300).attr("stroke-opacity", 0).remove();
+  const linkEnter = linkSel.enter().append("line")
+    .attr("stroke", "#14142a")
+    .attr("stroke-width", 0.8)
+    .attr("stroke-opacity", 0)
+    .transition().duration(500).attr("stroke-opacity", 0.25);
+
+  // -- NODES --
+  const nodeSel = gNodes.selectAll("g.node").data(nodes, d => d.id);
+  nodeSel.exit().transition().duration(500).attr("opacity", 0).remove();
+
+  const nodeEnter = nodeSel.enter().append("g")
+    .attr("class", "node")
+    .attr("opacity", 0)
+    .style("cursor", "pointer")
+    .call(d3.drag()
+      .on("start", dragStart)
+      .on("drag", dragging)
+      .on("end", dragEnd)
+    )
+    .on("mouseenter", (e, d) => showTooltip(d))
+    .on("mouseleave", hideTooltip)
+    .on("dblclick", (e, d) => {
+      // Double-click: release pin so simulation reclaims it
+      d.fx = null; d.fy = null;
+      simulation.alpha(0.3).restart();
+      e.stopPropagation();
+    })
+    .on("contextmenu", (e, d) => {
+      // Right-click: open session tab for this agent
+      e.preventDefault();
+      if (typeof openPromptPanel === "function") openPromptPanel(d.id, "session");
+    })
+    .on("click", (e, d) => {
+      // Left-click (if not a drag): open agent context panel
+      if (d._wasDragged) { d._wasDragged = false; return; }
+      e.stopPropagation();
+      if (typeof openPromptPanel === "function") openPromptPanel(d.id, "context");
+    });
+
+  nodeEnter.transition().duration(600).attr("opacity", 1);
+
+  // Outer status ring
+  nodeEnter.append("circle")
+    .attr("class", "ring")
+    .attr("r", d => nodeRadius(d.role) + 6)
+    .attr("fill", "none")
+    .attr("stroke", d => statusColor(d.status))
+    .attr("stroke-width", 1)
+    .attr("stroke-opacity", 0.2);
+
+  // Main circle
+  nodeEnter.append("circle")
+    .attr("class", "body")
+    .attr("r", d => nodeRadius(d.role))
+    .attr("fill", d => d.color + "18")
+    .attr("stroke", d => d.color)
+    .attr("stroke-width", 1.5);
+
+  // Inner pulse dot
+  nodeEnter.append("circle")
+    .attr("class", "pulse-dot")
+    .attr("r", d => nodeRadius(d.role) * 0.3)
+    .attr("fill", d => statusColor(d.status))
+    .attr("opacity", 0);
+
+  // Status label
+  nodeEnter.append("text")
+    .attr("class", "status-label")
+    .attr("text-anchor", "middle")
+    .attr("dy", 3)
+    .attr("fill", d => statusColor(d.status))
+    .attr("font-size", d => d.role === "lead" ? 9 : 8)
+    .attr("font-weight", 600)
+    .attr("letter-spacing", "0.06em");
+
+  // Name label
+  nodeEnter.append("text")
+    .attr("class", "name-label")
+    .attr("text-anchor", "middle")
+    .attr("dy", d => nodeRadius(d.role) + 18)
+    .attr("fill", "#7a7a90")
+    .attr("font-size", d => d.role === "lead" ? 12 : 11)
+    .attr("font-weight", 500)
+    .text(d => d.label);
+
+  // Activity subtitle (shows current tool → file)
+  nodeEnter.append("text")
+    .attr("class", "activity-label")
+    .attr("text-anchor", "middle")
+    .attr("dy", d => nodeRadius(d.role) + 32)
+    .attr("fill", "#3a3a58")
+    .attr("font-size", 9)
+    .attr("font-weight", 300)
+    .text("");
+
+  // Update simulation
+  simulation.nodes(nodes);
+  simulation.force("link").links(links);
+  simulation.alpha(0.4).restart();
+}
+
+function updateNodeVisuals() {
+  // Update existing node appearances based on current state
+  gNodes.selectAll("g.node").each(function(d) {
+    const g = d3.select(this);
+    const s = d.status || "idle";
+    const active = isActive(s);
+    const sc = statusColor(s);
+
+    // Ring
+    g.select(".ring")
+      .attr("stroke", sc)
+      .attr("stroke-width", active ? 2.5 : 1)
+      .attr("stroke-opacity", active ? 0.6 : 0.15)
+      .attr("stroke-dasharray", s === "blocked" ? "5,3" : "none");
+
+    // Body glow
+    g.select(".body").attr("filter", glowFilter(s));
+
+    // Pulse dot
+    g.select(".pulse-dot")
+      .attr("fill", sc)
+      .attr("opacity", active ? 0.5 : 0);
+
+    // Status text
+    g.select(".status-label")
+      .attr("fill", sc)
+      .text(s !== "idle" && s !== "done" ? s.toUpperCase().replace("_", " ") : "");
+
+    // Activity subtitle
+    g.select(".activity-label")
+      .text(d.activity || "")
+      .attr("fill", active ? "#5a5a78" : "#2a2a40");
+
+    // Name label (may have been updated by server)
+    g.select(".name-label").text(d.label);
+  });
+
+  // Update link highlighting
+  gLinks.selectAll("line").each(function(d) {
+    const sourceAgent = state.agents.get(d.source?.id || d.source);
+    const targetAgent = state.agents.get(d.target?.id || d.target);
+    const eitherActive = (sourceAgent && isActive(sourceAgent.status)) || (targetAgent && isActive(targetAgent.status));
+
+    d3.select(this)
+      .attr("stroke", eitherActive ? (sourceAgent?.color || "#2a2a3a") : "#14142a")
+      .attr("stroke-width", eitherActive ? 1.8 : 0.7)
+      .attr("stroke-opacity", eitherActive ? 0.5 : 0.2)
+      .attr("filter", eitherActive ? "url(#glow-edge)" : "none");
+  });
+}
+
+// ===================================================================
+// PARTICLES (message flight animations with labels)
+// ===================================================================
+function renderParticles() {
+  const now = Date.now();
+  state.particles = state.particles.filter(p => now - p.startTime < p.duration);
+
+  // Particle dots
+  const dotSel = gParticles.selectAll("circle.particle").data(state.particles, d => d.id);
+  dotSel.exit().remove();
+
+  dotSel.enter().append("circle")
+    .attr("class", "particle")
+    .attr("r", 3)
+    .attr("fill", d => d.color)
+    .attr("filter", "url(#glow-soft)")
+    .merge(dotSel)
+    .each(function(d) {
+      const progress = Math.min(1, (now - d.startTime) / d.duration);
+      const fromNode = state.agents.get(d.from);
+      const toNode = state.agents.get(d.to);
+      if (!fromNode || !toNode) return;
+
+      const x = fromNode.x + (toNode.x - fromNode.x) * progress;
+      const y = fromNode.y + (toNode.y - fromNode.y) * progress;
+      const opacity = Math.sin(progress * Math.PI) * 0.85;
+
+      d3.select(this)
+        .attr("cx", x).attr("cy", y)
+        .attr("opacity", opacity)
+        .attr("r", 2 + Math.sin(progress * Math.PI) * 3);
+    });
+
+  // Particle labels (text traveling alongside dot)
+  const labelSel = gParticles.selectAll("text.particle-label").data(
+    state.particles.filter(p => p.label), d => d.id
+  );
+  labelSel.exit().remove();
+
+  labelSel.enter().append("text")
+    .attr("class", "particle-label")
+    .attr("fill", d => d.color)
+    .attr("font-size", 9)
+    .attr("font-family", "'JetBrains Mono', monospace")
+    .attr("text-anchor", "middle")
+    .text(d => d.label)
+    .merge(labelSel)
+    .each(function(d) {
+      const progress = Math.min(1, (now - d.startTime) / d.duration);
+      const fromNode = state.agents.get(d.from);
+      const toNode = state.agents.get(d.to);
+      if (!fromNode || !toNode) return;
+
+      const x = fromNode.x + (toNode.x - fromNode.x) * progress;
+      const y = fromNode.y + (toNode.y - fromNode.y) * progress - 10;
+      const opacity = Math.sin(progress * Math.PI) * 0.7;
+
+      d3.select(this)
+        .attr("x", x).attr("y", y)
+        .attr("opacity", opacity);
+    });
+}
+
+// ===================================================================
+// TOOLTIP
+// ===================================================================
+let tooltipG = null;
+
+function showTooltip(d) {
+  hideTooltip();
+  const nodeG = gNodes.selectAll("g.node").filter(n => n.id === d.id);
+  const r = nodeRadius(d.role);
+
+  tooltipG = nodeG.append("g").attr("class", "node-tooltip");
+  const boxW = 230, boxH = 64;
+  tooltipG.append("rect")
+    .attr("x", -boxW/2).attr("y", -(r + 12 + boxH))
+    .attr("width", boxW).attr("height", boxH)
+    .attr("rx", 6).attr("fill", "#0c0c1e").attr("stroke", "#1e1e3a").attr("opacity", 0.95);
+
+  tooltipG.append("text")
+    .attr("x", -boxW/2 + 10).attr("y", -(r + 12 + boxH - 18))
+    .attr("fill", "#9a9ab0").attr("font-size", 10)
+    .text(`${d.lastTool || "—"} → ${(d.lastFile || "—").split(/[/\\]/).pop()}`);
+
+  tooltipG.append("text")
+    .attr("x", -boxW/2 + 10).attr("y", -(r + 12 + boxH - 32))
+    .attr("fill", "#5a5a70").attr("font-size", 9)
+    .text(`~${(d.tokens / 1000).toFixed(1)}k tokens · ${d.toolCalls} tool calls`);
+
+  tooltipG.append("text")
+    .attr("x", -boxW/2 + 10).attr("y", -(r + 12 + boxH - 47))
+    .attr("fill", "#3a3a50").attr("font-size", 9)
+    .text(`session: ${d.shortId || d.id.substring(0, 12)}`);
+}
+
+function hideTooltip() {
+  if (tooltipG) { tooltipG.remove(); tooltipG = null; }
+  gNodes.selectAll(".node-tooltip").remove();
+}
+
+// ===================================================================
+// DRAG — nodes stay where you put them. Double-click to release.
+// ===================================================================
+function dragStart(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+  d._wasDragged = false;
+}
+function dragging(event, d) {
+  d.fx = event.x; d.fy = event.y;
+  d._wasDragged = true; // Mark so click handler ignores
+}
+function dragEnd(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  // Keep ALL nodes pinned where dropped
+  // (double-click to release back to simulation)
+}
+
+// ===================================================================
+// SIDEBAR RENDERING (incremental — no flash)
+// ===================================================================
+const mailboxEl = document.getElementById("mailbox-list");
+const eventListEl = document.getElementById("event-list");
+
+// Track what we've already rendered so we only add NEW items
+let lastRenderedMsgCount = 0;
+let lastRenderedEvtCount = 0;
+const MAX_SIDEBAR_EVENTS = 40;
+const MAX_SIDEBAR_MSGS = 8;
+
+function renderMailbox() {
+  const total = state.messages.length;
+  if (total === lastRenderedMsgCount) return; // nothing new
+
+  const newMsgs = state.messages.slice(lastRenderedMsgCount);
+  lastRenderedMsgCount = total;
+
+  for (const m of newMsgs) {
+    const from = state.agents.get(m.from);
+    const to = state.agents.get(m.to);
+    const fromLabel = from ? (from.label.includes(":") ? from.label.split(":")[1].trim() : from.label) : m.from.substring(0, 8);
+    const toLabel = to ? (to.label.includes(":") ? to.label.split(":")[1].trim() : to.label) : m.to.substring(0, 8);
+
+    const div = document.createElement("div");
+    div.className = "msg-card";
+    div.style.borderColor = (from?.color || "#1e1e3a") + "22";
+    div.innerHTML =
+      `<span class="msg-from" style="color:${from?.color || "#999"}">${fromLabel}</span>` +
+      `<span class="msg-arrow">→</span>` +
+      `<span style="color:${to?.color || "#999"}">${toLabel}</span>` +
+      `<span class="msg-body">${escHtml(m.text)}</span>`;
+
+    // Prepend (newest on top)
+    mailboxEl.insertBefore(div, mailboxEl.firstChild);
+  }
+
+  // Trim old items
+  while (mailboxEl.children.length > MAX_SIDEBAR_MSGS) {
+    mailboxEl.removeChild(mailboxEl.lastChild);
+  }
+}
+
+function renderEventStream() {
+  const total = state.events.length;
+  if (total === lastRenderedEvtCount) return; // nothing new
+
+  const newEvts = state.events.slice(lastRenderedEvtCount);
+  lastRenderedEvtCount = total;
+
+  for (const e of newEvts) {
+    const agent = state.agents.get(e.agentId);
+    const sc = statusColor(e.status);
+    const agentLabel = agent ? (agent.label.includes(":") ? agent.label.split(":")[1].trim().substring(0, 5) : agent.label.substring(0, 5)) : "?";
+    const toolLabel = (e.tool || "—").replace("mcp__", "").substring(0, 8);
+    const fileLabel = e.file ? e.file.split(/[/\\]/).pop() : "";
+
+    const div = document.createElement("div");
+    div.className = "evt-row";
+    div.dataset.ts = e.timestamp;
+    div.innerHTML =
+      `<div class="evt-dot" style="background:${sc}"></div>` +
+      `<span class="evt-agent" style="color:${agent?.color || '#666'}">${agentLabel}</span>` +
+      `<span class="evt-tool">${toolLabel}</span>` +
+      `<span class="evt-file">${fileLabel}</span>` +
+      `<span class="evt-age"></span>`;
+
+    eventListEl.insertBefore(div, eventListEl.firstChild);
+  }
+
+  // Trim old items
+  while (eventListEl.children.length > MAX_SIDEBAR_EVENTS) {
+    eventListEl.removeChild(eventListEl.lastChild);
+  }
+}
+
+// Separate slow loop for updating ages (every 2s, no DOM rebuild)
+setInterval(() => {
+  const now = Date.now();
+  for (const row of eventListEl.children) {
+    const ts = parseInt(row.dataset.ts || "0", 10);
+    if (!ts) continue;
+    const age = Math.floor((now - ts) / 1000);
+    const ageEl = row.querySelector(".evt-age");
+    if (ageEl) ageEl.textContent = age + "s";
+    // Fade old items via opacity (CSS transition handles smoothness)
+    row.style.opacity = Math.max(0.2, 1 - age / 60);
+  }
+}, 2000);
+
+function updateStats() {
+  document.getElementById("stat-agents").textContent = state.agents.size;
+  document.getElementById("stat-events").textContent = state.totalEvents;
+  document.getElementById("stat-tokens").textContent = (state.totalTokens / 1000).toFixed(1) + "k";
+  document.getElementById("stat-msgs").textContent = state.totalMessages;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ===================================================================
+// LINK MANAGEMENT
+// ===================================================================
+function ensureLink(sourceId, targetId, strength) {
+  const key = `${sourceId}-${targetId}`;
+  if (!state.links.find(l => {
+    const sId = l.source?.id || l.source;
+    const tId = l.target?.id || l.target;
+    return (sId === sourceId && tId === targetId) || (sId === targetId && tId === sourceId);
+  })) {
+    state.links.push({ source: sourceId, target: targetId, strength: strength || 0.15 });
+    return true;
+  }
+  return false;
+}
+
+// Auto-link: every agent connects to lead, workers connect to each other
+function autoLink(agentId) {
+  let changed = false;
+  const agent = state.agents.get(agentId);
+  if (!agent) return false;
+
+  // Connect to lead
+  for (const [id, a] of state.agents) {
+    if (a.role === "lead" && id !== agentId) {
+      changed = ensureLink(id, agentId, agent.role === "worker" ? 0.25 : 0.12) || changed;
+    }
+  }
+
+  // Workers connect to each other (weakly)
+  if (agent.role === "worker") {
+    for (const [id, a] of state.agents) {
+      if (a.role === "worker" && id !== agentId) {
+        if (Math.random() > 0.5) { // Don't connect ALL workers, just some
+          changed = ensureLink(id, agentId, 0.08) || changed;
+        }
+      }
+    }
+  }
+
+  return changed;
+}
+
+// ===================================================================
+// EVENT PROCESSING
+// ===================================================================
+function handleAgentJoin(agent) {
+  if (!state.agents.has(agent.id)) {
+    // Spread new nodes around center with enough distance to avoid overlap
+    const angle = state.agents.size * (Math.PI * 2 / 7) + Math.random() * 0.3;
+    const dist = 150 + state.agents.size * 60 + Math.random() * 50;
+    state.agents.set(agent.id, {
+      ...agent,
+      x: width / 2 + Math.cos(angle) * dist,
+      y: height / 2 + Math.sin(angle) * dist,
+    });
+    autoLink(agent.id);
+    rebuildGraph();
+  }
+}
+
+function handleEvent(evt) {
+  state.events.push(evt);
+  if (state.events.length > 300) state.events = state.events.slice(-200);
+  state.totalEvents++;
+  state.totalTokens += evt.tokens || 0;
+}
+
+function handleAgentUpdate(update) {
+  const existing = state.agents.get(update.id);
+  if (existing) {
+    Object.assign(existing, update);
+  }
+}
+
+function handleMessage(msg) {
+  state.messages.push(msg);
+  if (state.messages.length > 80) state.messages = state.messages.slice(-60);
+  state.totalMessages++;
+
+  // Create particle with label
+  const fromAgent = state.agents.get(msg.from);
+  state.particles.push({
+    id: msg.id,
+    from: msg.from,
+    to: msg.to,
+    color: fromAgent?.color || "#fff",
+    label: msg.text ? msg.text.substring(0, 24) : "",
+    startTime: Date.now(),
+    duration: 2000 + Math.random() * 800,
+  });
+
+  // Ensure link between communicating agents
+  if (ensureLink(msg.from, msg.to, 0.2)) {
+    rebuildGraph();
+  }
+}
+
+function handleSnapshot(data) {
+  // Capture server working directory for prompt panel
+  if (data.serverCwd) serverCwd = data.serverCwd;
+
+  // Capture teams data
+  if (data.teams) teamsData = data.teams;
+
+  // Load initial state
+  if (data.agents) {
+    for (const [id, agent] of Object.entries(data.agents)) {
+      handleAgentJoin(agent);
+    }
+  }
+  if (data.recentEvents) {
+    for (const evt of data.recentEvents) {
+      state.events.push(evt);
+      state.totalEvents++;
+      state.totalTokens += evt.tokens || 0;
+    }
+  }
+  if (data.recentMessages) {
+    for (const msg of data.recentMessages) {
+      state.messages.push(msg);
+      state.totalMessages++;
+    }
+  }
+  // Sync render counters — render everything from snapshot now
+  lastRenderedEvtCount = 0;
+  lastRenderedMsgCount = 0;
+  renderEventStream();
+  renderMailbox();
+  rebuildGraph();
+}
+
+// ===================================================================
+// WEBSOCKET
+// ===================================================================
+let ws = null;
+let reconnectTimer = null;
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}`);
+
+  ws.onopen = () => {
+    document.getElementById("conn-banner").classList.remove("show");
+    document.getElementById("status-dot").classList.remove("paused");
+  };
+
+  ws.onclose = () => {
+    document.getElementById("conn-banner").classList.add("show");
+    document.getElementById("status-dot").classList.add("paused");
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+
+      switch (data.type) {
+        case "snapshot":
+          handleSnapshot(data);
+          break;
+
+        case "agent_join":
+          handleAgentJoin(data.agent);
+          break;
+
+        case "event":
+          handleEvent(data.event);
+          if (data.agentUpdate) handleAgentUpdate(data.agentUpdate);
+          break;
+
+        case "message":
+          handleMessage(data.message);
+          break;
+
+        case "task_update":
+          // Could extend to show task nodes too
+          break;
+
+        case "agent_context":
+          if (typeof renderAgentContext === "function") renderAgentContext(data);
+          break;
+
+        case "inbox_update":
+          if (typeof handleInboxUpdate === "function") handleInboxUpdate(data);
+          break;
+
+        case "team_update":
+          // New team members may have appeared — they'll be in subsequent agent_join messages
+          break;
+
+        case "inbox_message_sent":
+          // Confirmation that our message was written
+          break;
+
+        case "session_started":
+        case "session_output":
+        case "session_ended":
+        case "session_error":
+          if (typeof handleSessionMessage === "function") handleSessionMessage(data);
+          break;
+      }
+    } catch {}
+  };
+}
+
+connect();
+
+// ===================================================================
+// RENDER LOOP
+// ===================================================================
+let lastRender = 0;
+function renderLoop(ts) {
+  requestAnimationFrame(renderLoop);
+  if (state.paused) return;
+
+  // Throttle sidebar updates to ~5fps
+  if (ts - lastRender > 200) {
+    lastRender = ts;
+    updateNodeVisuals();
+    renderMailbox();
+    renderEventStream();
+    updateStats();
+  }
+
+  // Particles need smooth updates
+  renderParticles();
+}
+requestAnimationFrame(renderLoop);
+
+// ===================================================================
+// CONTROLS
+// ===================================================================
+document.getElementById("btn-pause").addEventListener("click", () => {
+  state.paused = !state.paused;
+  document.getElementById("btn-pause").textContent = state.paused ? "▶ Resume" : "⏸ Pause";
+  document.getElementById("status-dot").classList.toggle("paused", state.paused);
+  if (!state.paused) simulation.alpha(0.3).restart();
+});
+
+document.getElementById("btn-reset").addEventListener("click", () => {
+  state.agents.clear();
+  state.events = [];
+  state.messages = [];
+  state.particles = [];
+  state.links = [];
+  state.totalEvents = 0;
+  state.totalTokens = 0;
+  state.totalMessages = 0;
+  lastRenderedEvtCount = 0;
+  lastRenderedMsgCount = 0;
+  mailboxEl.innerHTML = "";
+  eventListEl.innerHTML = "";
+  gNodes.selectAll("*").remove();
+  gLinks.selectAll("*").remove();
+  gParticles.selectAll("*").remove();
+  simulation.nodes([]);
+  simulation.force("link").links([]);
+  // Reconnect to get fresh state
+  if (ws) ws.close();
+});
+
+// Speed button (could control server-side demo speed via WS message)
+let speedLevel = 0;
+const speeds = ["1×", "2×", "4×"];
+document.getElementById("btn-speed").addEventListener("click", () => {
+  speedLevel = (speedLevel + 1) % speeds.length;
+  document.getElementById("btn-speed").textContent = speeds[speedLevel];
+});
+
+// Zoom buttons
+document.getElementById("btn-zoom-in").addEventListener("click", () => {
+  svg.transition().duration(300).call(zoom.scaleBy, 1.4);
+});
+document.getElementById("btn-zoom-out").addEventListener("click", () => {
+  svg.transition().duration(300).call(zoom.scaleBy, 0.7);
+});
+document.getElementById("btn-zoom-fit").addEventListener("click", () => {
+  svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
+});
+
+// ===================================================================
+// AGENT PANEL — Tabbed: Context (inbox/tasks/prompt) + Session (Claude Code)
+// ===================================================================
+const promptPanel = document.getElementById("prompt-panel");
+const promptOutput = document.getElementById("prompt-output");
+const promptInput = document.getElementById("prompt-input");
+const promptPerms = document.getElementById("prompt-permissions");
+const promptPermText = document.getElementById("prompt-perm-text");
+const promptTitle = document.getElementById("prompt-title");
+const cwdInput = document.getElementById("prompt-cwd");
+const cwdBrowse = document.getElementById("prompt-cwd-browse");
+const panelTabs = document.querySelectorAll(".panel-tab");
+const tabContext = document.getElementById("tab-context");
+const tabSession = document.getElementById("tab-session");
+const ctxDot = document.getElementById("ctx-dot");
+const ctxName = document.getElementById("ctx-name");
+const ctxRole = document.getElementById("ctx-role");
+const ctxPrompt = document.getElementById("ctx-prompt");
+const ctxPromptSection = document.getElementById("ctx-prompt-section");
+const ctxTasks = document.getElementById("ctx-tasks");
+const ctxTasksSection = document.getElementById("ctx-tasks-section");
+const ctxInbox = document.getElementById("ctx-inbox");
+const ctxInboxCount = document.getElementById("ctx-inbox-count");
+const inboxInput = document.getElementById("inbox-input");
+const inboxSendBtn = document.getElementById("inbox-send");
+
+let activeSessionTag = null;
+let sessionRunning = false;
+let serverCwd = "";
+let panelAgentId = null; // which agent the panel is focused on
+let teamsData = {};      // populated from snapshot
+
+// ── Tab switching ─────────────────────────────────────────
+function switchTab(tabName) {
+  for (const tab of panelTabs) {
+    tab.classList.toggle("active", tab.dataset.tab === tabName);
+  }
+  tabContext.classList.toggle("active", tabName === "context");
+  tabSession.classList.toggle("active", tabName === "session");
+}
+
+panelTabs.forEach(tab => {
+  tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+});
+
+// ── Open panel for a specific agent ───────────────────────
+function openPromptPanel(agentId, tab) {
+  promptPanel.classList.remove("hidden", "minimized");
+  panelAgentId = agentId || null;
+
+  if (agentId) {
+    const agent = state.agents.get(agentId);
+    if (agent) {
+      promptTitle.textContent = `🔮 ${agent.label}`;
+      if (agent.cwd) cwdInput.value = agent.cwd;
+
+      // Always populate context header immediately from local state
+      ctxDot.style.background = agent.color || "#4a4a60";
+      ctxDot.style.color = agent.color || "#4a4a60";
+      ctxName.textContent = agent.label || agentId;
+      ctxRole.textContent = agent.agentType || agent.role || "";
+
+      // Request full context from server
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "get_agent_context", agentId }));
+      }
+
+      // Default to context tab when clicking a node
+      switchTab(tab || "context");
+    } else {
+      switchTab(tab || "session");
+    }
+  } else {
+    promptTitle.textContent = "🔮 New Claude Session";
+    if (!cwdInput.value) cwdInput.value = getDefaultCwd();
+    // No agent = open session tab
+    switchTab(tab || "session");
+    // Clear context
+    ctxName.textContent = "—";
+    ctxRole.textContent = "";
+    ctxPromptSection.style.display = "none";
+    ctxTasksSection.style.display = "none";
+    ctxInbox.innerHTML = '<div class="inbox-empty">Select an agent to see its context</div>';
+    ctxInboxCount.textContent = "";
+  }
+
+  if (tab === "session" || !agentId) {
+    promptInput.focus();
+  } else {
+    inboxInput.focus();
+  }
+}
+
+// ── Handle agent_context response from server ─────────────
+function renderAgentContext(data) {
+  if (!data.agentId) return;
+
+  const agent = data.agent || {};
+
+  // Header
+  ctxDot.style.background = agent.color || "#4a4a60";
+  ctxDot.style.color = agent.color || "#4a4a60";
+  ctxName.textContent = agent.label || data.agentId;
+  ctxRole.textContent = agent.agentType || agent.role || "";
+
+  // Spawn prompt
+  if (data.spawnPrompt) {
+    ctxPromptSection.style.display = "block";
+    ctxPrompt.textContent = data.spawnPrompt;
+    ctxPrompt.classList.remove("expanded");
+    ctxPrompt.onclick = () => ctxPrompt.classList.toggle("expanded");
+  } else {
+    ctxPromptSection.style.display = "none";
+  }
+
+  // Tasks
+  if (data.allTasks && data.allTasks.length > 0) {
+    ctxTasksSection.style.display = "block";
+    ctxTasks.innerHTML = "";
+    // Sort: this agent's tasks first, then others
+    const agentName = agent.label || data.agentId.split("@")[0];
+    const sorted = [...data.allTasks].sort((a, b) => {
+      const aOwned = (a.owner === agentName) ? 0 : 1;
+      const bOwned = (b.owner === agentName) ? 0 : 1;
+      return aOwned - bOwned || Number(a.id) - Number(b.id);
+    });
+    for (const task of sorted) {
+      const owned = task.owner === agentName;
+      const statusCls = `task-status-${(task.status || "pending").replace(/\s/g, "_")}`;
+      const el = document.createElement("div");
+      el.className = "task-item";
+      if (owned) el.style.borderLeft = `2px solid ${agent.color || "#06d6a0"}`;
+      el.innerHTML = `
+        <span class="task-id">#${task.id}</span>
+        <span class="task-subject" ${owned ? 'style="color:#d0d0dc;font-weight:500"' : ""}>${task.subject || "Untitled"}</span>
+        ${task.owner ? `<span style="font-size:9px;color:#3a3a58">${task.owner}</span>` : ""}
+        <span class="task-status-badge ${statusCls}">${task.status || "pending"}</span>
+      `;
+      ctxTasks.appendChild(el);
+    }
+  } else {
+    ctxTasksSection.style.display = "none";
+  }
+
+  // Inbox
+  renderInboxMessages(data.inbox || []);
+}
+
+function renderInboxMessages(messages) {
+  ctxInbox.innerHTML = "";
+  ctxInboxCount.textContent = messages.length > 0 ? `(${messages.length})` : "";
+
+  if (messages.length === 0) {
+    ctxInbox.innerHTML = '<div class="inbox-empty">No messages in inbox</div>';
+    return;
+  }
+
+  for (const msg of messages) {
+    const el = document.createElement("div");
+
+    // Detect structured messages (shutdown_request, idle_notification, etc.)
+    let text = msg.text || "";
+    let isStructured = false;
+    try {
+      const parsed = typeof text === "string" ? JSON.parse(text) : text;
+      if (parsed.type) {
+        isStructured = true;
+        text = `[${parsed.type}] ${parsed.reason || parsed.from || ""}`;
+      }
+    } catch {}
+
+    const isFromSelf = msg.from === "observer" || msg.from === "swarm-observer";
+    el.className = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
+
+    const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    el.innerHTML = `
+      <span class="inbox-time">${time}</span>
+      <span class="inbox-from" style="color:${isFromSelf ? "#7b68ee" : "#06d6a0"}">${msg.from || "?"}</span>
+      ${typeof text === "string" ? text.substring(0, 300) : JSON.stringify(text).substring(0, 300)}
+    `;
+    ctxInbox.appendChild(el);
+  }
+  ctxInbox.scrollTop = ctxInbox.scrollHeight;
+}
+
+// ── Send inbox message ────────────────────────────────────
+function sendInboxMessage() {
+  const text = inboxInput.value.trim();
+  if (!text || !panelAgentId) return;
+  inboxInput.value = "";
+
+  const agent = state.agents.get(panelAgentId);
+  if (!agent?.teamName) {
+    // Not a team agent — can't send inbox messages
+    const el = document.createElement("div");
+    el.className = "inbox-msg structured";
+    el.textContent = "⚠ This agent is not part of an agent team — inbox messaging unavailable.";
+    ctxInbox.appendChild(el);
+    ctxInbox.scrollTop = ctxInbox.scrollHeight;
+    return;
+  }
+
+  const targetName = agent.label || panelAgentId.split("@")[0];
+
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: "send_inbox_message",
+      teamName: agent.teamName,
+      targetAgent: targetName,
+      fromName: "observer",
+      text,
+    }));
+  }
+
+  // Optimistic UI update
+  const el = document.createElement("div");
+  el.className = "inbox-msg from-self";
+  const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  el.innerHTML = `
+    <span class="inbox-time">${time}</span>
+    <span class="inbox-from" style="color:#7b68ee">observer</span>
+    ${text}
+  `;
+  ctxInbox.appendChild(el);
+  ctxInbox.scrollTop = ctxInbox.scrollHeight;
+
+  // Update count
+  const curCount = parseInt(ctxInboxCount.textContent.replace(/[()]/g, "") || "0");
+  ctxInboxCount.textContent = `(${curCount + 1})`;
+}
+
+inboxSendBtn.addEventListener("click", sendInboxMessage);
+inboxInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendInboxMessage();
+  if (e.key === "Escape") closePromptPanel();
+});
+
+// ── Handle live inbox updates from server ─────────────────
+function handleInboxUpdate(data) {
+  // If the panel is open for this agent, append new messages
+  if (!panelAgentId) return;
+  const agent = state.agents.get(panelAgentId);
+  if (!agent?.teamName || agent.teamName !== data.teamName) return;
+
+  const agentName = agent.label || panelAgentId.split("@")[0];
+  if (data.agentName !== agentName && data.agentName !== panelAgentId) return;
+
+  // Append new messages
+  if (data.newMessages) {
+    const emptyMsg = ctxInbox.querySelector(".inbox-empty");
+    if (emptyMsg) emptyMsg.remove();
+
+    for (const msg of data.newMessages) {
+      const el = document.createElement("div");
+      let text = msg.text || "";
+      let isStructured = false;
+      try {
+        const parsed = typeof text === "string" ? JSON.parse(text) : text;
+        if (parsed.type) { isStructured = true; text = `[${parsed.type}] ${parsed.reason || parsed.from || ""}`; }
+      } catch {}
+
+      const isFromSelf = msg.from === "observer";
+      el.className = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
+      const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+      el.innerHTML = `
+        <span class="inbox-time">${time}</span>
+        <span class="inbox-from" style="color:${isFromSelf ? "#7b68ee" : "#06d6a0"}">${msg.from || "?"}</span>
+        ${typeof text === "string" ? text.substring(0, 300) : JSON.stringify(text).substring(0, 300)}
+      `;
+      ctxInbox.appendChild(el);
+    }
+    ctxInbox.scrollTop = ctxInbox.scrollHeight;
+    ctxInboxCount.textContent = `(${data.totalCount || "?"})`;
+  }
+}
+
+// ── CWD helpers (for session tab) ─────────────────────────
+function getDefaultCwd() {
+  for (const [, agent] of state.agents) {
+    if (agent.cwd) return agent.cwd;
+  }
+  return serverCwd || "";
+}
+
+function getKnownCwds() {
+  const cwds = new Map();
+  for (const [, agent] of state.agents) {
+    if (agent.cwd && !cwds.has(agent.cwd)) {
+      cwds.set(agent.cwd, agent.label || agent.id);
+    }
+  }
+  if (serverCwd && !cwds.has(serverCwd)) {
+    cwds.set(serverCwd, "server");
+  }
+  return cwds;
+}
+
+function showCwdDropdown() {
+  document.querySelectorAll(".cwd-dropdown").forEach(el => el.remove());
+  const cwds = getKnownCwds();
+  if (cwds.size === 0) return;
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "cwd-dropdown";
+  for (const [dir, label] of cwds) {
+    const item = document.createElement("div");
+    item.className = "cwd-dropdown-item";
+    item.innerHTML = `${dir.replace(/\\/g, "/")}<span class="cwd-agent-name">${label}</span>`;
+    item.addEventListener("click", () => { cwdInput.value = dir; dropdown.remove(); });
+    dropdown.appendChild(item);
+  }
+  const bar = cwdInput.closest(".prompt-cwd-bar");
+  bar.style.position = "relative";
+  bar.appendChild(dropdown);
+  setTimeout(() => {
+    document.addEventListener("click", function closeDropdown(e) {
+      if (!dropdown.contains(e.target) && e.target !== cwdBrowse) {
+        dropdown.remove(); document.removeEventListener("click", closeDropdown);
+      }
+    });
+  }, 10);
+}
+cwdBrowse.addEventListener("click", showCwdDropdown);
+
+// ── Panel lifecycle ───────────────────────────────────────
+function closePromptPanel() {
+  promptPanel.classList.add("hidden");
+  if (activeSessionTag && ws) {
+    ws.send(JSON.stringify({ type: "kill", sessionTag: activeSessionTag }));
+  }
+  activeSessionTag = null;
+  sessionRunning = false;
+  panelAgentId = null;
+  promptOutput.innerHTML = "";
+  promptPerms.classList.add("hidden");
+  document.querySelectorAll(".cwd-dropdown").forEach(el => el.remove());
+}
+
+function minimizePromptPanel() {
+  promptPanel.classList.toggle("minimized");
+}
+
+function appendOutput(text, cls) {
+  const div = document.createElement("div");
+  div.className = cls || "";
+  div.textContent = text;
+  promptOutput.appendChild(div);
+  promptOutput.scrollTop = promptOutput.scrollHeight;
+}
+
+// ── Session tab: Claude Code spawning ─────────────────────
+function sendPrompt() {
+  const text = promptInput.value.trim();
+  if (!text) return;
+  promptInput.value = "";
+
+  if (!sessionRunning) {
+    const cwd = cwdInput.value.trim() || undefined;
+    appendOutput(`▸ ${text}`, "out-user");
+    appendOutput(`Starting Claude session${cwd ? " in " + cwd : ""}…`, "out-status");
+
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "prompt", text, cwd }));
+    } else {
+      appendOutput("Not connected to server", "out-error");
+    }
+  } else {
+    appendOutput(`▸ ${text}`, "out-user");
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify({ type: "respond", sessionTag: activeSessionTag, text }));
+    }
+  }
+}
+
+function sendPermission(response) {
+  if (ws && ws.readyState === 1 && activeSessionTag) {
+    ws.send(JSON.stringify({ type: "respond", sessionTag: activeSessionTag, text: response }));
+  }
+  promptPerms.classList.add("hidden");
+  appendOutput(`  → ${response === "y" ? "Approved" : response === "n" ? "Denied" : "Approved (always)"}`, "out-status");
+}
+
+function handleSessionMessage(data) {
+  switch (data.type) {
+    case "session_started":
+      activeSessionTag = data.sessionTag;
+      sessionRunning = true;
+      promptTitle.textContent = `🔮 Session ${data.sessionTag.substring(0, 8)}`;
+      if (data.cwd) {
+        cwdInput.value = data.cwd;
+        appendOutput(`📁 ${data.cwd}`, "out-system");
+      }
+      appendOutput("Session started — waiting for Claude…", "out-status");
+      break;
+
+    case "session_output":
+      if (data.sessionTag !== activeSessionTag) return;
+      const cleaned = data.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\r/g, "");
+      if (cleaned.trim()) {
+        const cls = data.isError ? "out-error" : data.needsPermission ? "out-tool" : "out-assistant";
+        appendOutput(cleaned, cls);
+      }
+      if (data.needsPermission) {
+        const lines = cleaned.trim().split("\n");
+        promptPermText.textContent = lines[lines.length - 1].substring(0, 80);
+        promptPerms.classList.remove("hidden");
+      }
+      break;
+
+    case "session_ended":
+      if (data.sessionTag !== activeSessionTag) return;
+      sessionRunning = false;
+      appendOutput(`\nSession ended (exit code: ${data.exitCode})`, "out-status");
+      promptPerms.classList.add("hidden");
+      break;
+
+    case "session_error":
+      if (data.sessionTag && data.sessionTag !== activeSessionTag) return;
+      appendOutput(`Error: ${data.error}`, "out-error");
+      sessionRunning = false;
+      break;
+  }
+}
+
+// ── Wire up UI events ─────────────────────────────────────
+document.getElementById("btn-new-session").addEventListener("click", () => openPromptPanel(null, "session"));
+document.getElementById("prompt-close").addEventListener("click", closePromptPanel);
+document.getElementById("prompt-minimize").addEventListener("click", minimizePromptPanel);
+document.getElementById("prompt-send").addEventListener("click", sendPrompt);
+promptInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendPrompt();
+  if (e.key === "Escape") closePromptPanel();
+});
+
+for (const btn of document.querySelectorAll(".perm-btn")) {
+  btn.addEventListener("click", () => sendPermission(btn.dataset.response));
+}
+
+</script>
+</body>
+</html>
