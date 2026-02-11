@@ -437,6 +437,61 @@
   }
   .inbox-send-row button:hover { background: #8b78fe; }
 
+  /* Chat / Message tab */
+  .chat-container {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .chat-header {
+    padding: 8px 16px; border-bottom: 1px solid #14142a;
+    display: flex; align-items: center; gap: 8px;
+    background: #0c0c1a; flex-shrink: 0;
+    font-size: 12px; color: #7a7a98;
+  }
+  .chat-header .chat-agent-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    box-shadow: 0 0 6px currentColor; flex-shrink: 0;
+  }
+  .chat-header .chat-agent-name { font-weight: 600; color: #d0d0dc; }
+  .chat-header .chat-team-name { font-size: 10px; color: #3a3a58; margin-left: auto; }
+  .chat-messages {
+    flex: 1; overflow-y: auto; padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .chat-messages .inbox-empty {
+    font-size: 11px; color: #2a2a40; text-align: center;
+    padding: 24px; font-style: italic;
+  }
+  .chat-input-row {
+    display: flex; gap: 8px; padding: 10px 16px;
+    border-top: 1px solid #1a1a3a;
+    flex-shrink: 0; background: #08081a;
+  }
+  .chat-input-row input {
+    flex: 1; background: #0e0e1c; border: 1px solid #1a1a3a;
+    color: #d0d0dc; padding: 8px 12px; border-radius: 6px;
+    font: 12px/1.4 'JetBrains Mono', monospace;
+    outline: none; transition: border-color 0.2s;
+  }
+  .chat-input-row input:focus { border-color: #7b68ee; }
+  .chat-input-row input::placeholder { color: #2a2a40; }
+  .chat-input-row button {
+    background: #7b68ee; border: none; color: #fff;
+    padding: 8px 16px; border-radius: 6px;
+    font: 12px/1 'JetBrains Mono', monospace;
+    font-weight: 700; cursor: pointer; transition: all 0.2s;
+  }
+  .chat-input-row button:hover { background: #8b78fe; }
+  .chat-input-row button:disabled { background: #1a1a3a; color: #3a3a50; cursor: default; }
+
+  /* Message button in context header */
+  .agent-ctx-msg-btn {
+    background: none; border: 1px solid #7b68ee40;
+    color: #7b68ee; padding: 2px 8px; border-radius: 4px;
+    font: 10px/1 'JetBrains Mono', monospace;
+    cursor: pointer; transition: all 0.2s; margin-left: 8px;
+  }
+  .agent-ctx-msg-btn:hover { border-color: #7b68ee; background: #7b68ee18; }
+
   /* Task list in context */
   .task-list { display: flex; flex-direction: column; gap: 4px; }
   .task-item {
@@ -457,7 +512,8 @@
 
   .prompt-panel.minimized .panel-tabs,
   .prompt-panel.minimized .panel-tab-content,
-  .prompt-panel.minimized .inbox-send-row { display: none; }
+  .prompt-panel.minimized .inbox-send-row,
+  .prompt-panel.minimized .chat-input-row { display: none; }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 4px; }
@@ -526,6 +582,7 @@
     </div>
     <div class="panel-tabs" id="panel-tabs">
       <button class="panel-tab active" data-tab="context">📋 Context</button>
+      <button class="panel-tab" data-tab="message">💬 Message</button>
       <button class="panel-tab" data-tab="session">⚡ Session</button>
     </div>
 
@@ -535,6 +592,7 @@
         <div class="agent-ctx-header" id="ctx-header">
           <div class="agent-ctx-dot" id="ctx-dot"></div>
           <span class="agent-ctx-name" id="ctx-name">—</span>
+          <button class="agent-ctx-msg-btn" id="ctx-msg-btn" title="Open Message tab">💬 Message</button>
           <span class="agent-ctx-role" id="ctx-role"></span>
         </div>
         <div class="agent-ctx-section" id="ctx-prompt-section" style="display:none">
@@ -550,9 +608,23 @@
           <div class="inbox-messages" id="ctx-inbox"></div>
         </div>
       </div>
-      <div class="inbox-send-row" id="inbox-send-row">
-        <input id="inbox-input" type="text" placeholder="Message this agent…" autocomplete="off" />
-        <button id="inbox-send">Send</button>
+    </div>
+
+    <!-- TAB: Message (dedicated chat interface) -->
+    <div class="panel-tab-content" id="tab-message">
+      <div class="chat-container">
+        <div class="chat-header" id="chat-header">
+          <div class="chat-agent-dot" id="chat-dot"></div>
+          <span class="chat-agent-name" id="chat-agent-name">—</span>
+          <span class="chat-team-name" id="chat-team-name"></span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="inbox-empty">Select an agent to start messaging</div>
+        </div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Send a message…" autocomplete="off" />
+          <button id="chat-send">Send</button>
+        </div>
       </div>
     </div>
 
@@ -1418,7 +1490,16 @@ const cwdInput = document.getElementById("prompt-cwd");
 const cwdBrowse = document.getElementById("prompt-cwd-browse");
 const panelTabs = document.querySelectorAll(".panel-tab");
 const tabContext = document.getElementById("tab-context");
+const tabMessage = document.getElementById("tab-message");
 const tabSession = document.getElementById("tab-session");
+const chatHeader = document.getElementById("chat-header");
+const chatDot = document.getElementById("chat-dot");
+const chatAgentName = document.getElementById("chat-agent-name");
+const chatTeamName = document.getElementById("chat-team-name");
+const chatMessages = document.getElementById("chat-messages");
+const chatInput = document.getElementById("chat-input");
+const chatSendBtn = document.getElementById("chat-send");
+const ctxMsgBtn = document.getElementById("ctx-msg-btn");
 const ctxDot = document.getElementById("ctx-dot");
 const ctxName = document.getElementById("ctx-name");
 const ctxRole = document.getElementById("ctx-role");
@@ -1428,8 +1509,7 @@ const ctxTasks = document.getElementById("ctx-tasks");
 const ctxTasksSection = document.getElementById("ctx-tasks-section");
 const ctxInbox = document.getElementById("ctx-inbox");
 const ctxInboxCount = document.getElementById("ctx-inbox-count");
-const inboxInput = document.getElementById("inbox-input");
-const inboxSendBtn = document.getElementById("inbox-send");
+// inbox input moved to Message tab (chat-input / chat-send)
 
 let activeSessionTag = null;
 let sessionRunning = false;
@@ -1443,6 +1523,7 @@ function switchTab(tabName) {
     tab.classList.toggle("active", tab.dataset.tab === tabName);
   }
   tabContext.classList.toggle("active", tabName === "context");
+  tabMessage.classList.toggle("active", tabName === "message");
   tabSession.classList.toggle("active", tabName === "session");
 }
 
@@ -1491,10 +1572,10 @@ function openPromptPanel(agentId, tab) {
     ctxInboxCount.textContent = "";
   }
 
-  if (tab === "session" || !agentId) {
+  if (tab === "message" && agentId) {
+    openMessageTab(agentId);
+  } else if (tab === "session" || !agentId) {
     promptInput.focus();
-  } else {
-    inboxInput.focus();
   }
 }
 
@@ -1590,24 +1671,24 @@ function renderInboxMessages(messages) {
   ctxInbox.scrollTop = ctxInbox.scrollHeight;
 }
 
-// ── Send inbox message ────────────────────────────────────
+// ── Send inbox message (from Message tab chat input) ──────
 function sendInboxMessage() {
-  const text = inboxInput.value.trim();
+  const text = chatInput.value.trim();
   if (!text || !panelAgentId) return;
-  inboxInput.value = "";
+  chatInput.value = "";
 
   const agent = state.agents.get(panelAgentId);
   if (!agent?.teamName) {
-    // Not a team agent — can't send inbox messages
     const el = document.createElement("div");
     el.className = "inbox-msg structured";
-    el.textContent = "⚠ This agent is not part of an agent team — inbox messaging unavailable.";
-    ctxInbox.appendChild(el);
-    ctxInbox.scrollTop = ctxInbox.scrollHeight;
+    el.textContent = "This agent is not part of an agent team — inbox messaging unavailable.";
+    chatMessages.appendChild(el);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
     return;
   }
 
-  const targetName = agent.label || panelAgentId.split("@")[0];
+  // Fix: use teamMemberName (from config.json member.name) — not label which may be a task description
+  const targetName = agent.teamMemberName || agent.label || panelAgentId.split("@")[0];
 
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({
@@ -1619,25 +1700,25 @@ function sendInboxMessage() {
     }));
   }
 
-  // Optimistic UI update
+  // Optimistic UI update — append to chat messages
   const el = document.createElement("div");
   el.className = "inbox-msg from-self";
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   el.innerHTML = `
     <span class="inbox-time">${time}</span>
     <span class="inbox-from" style="color:#7b68ee">observer</span>
-    ${text}
+    ${escHtml(text)}
   `;
-  ctxInbox.appendChild(el);
-  ctxInbox.scrollTop = ctxInbox.scrollHeight;
+  chatMessages.appendChild(el);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 
-  // Update count
+  // Also update context tab inbox count
   const curCount = parseInt(ctxInboxCount.textContent.replace(/[()]/g, "") || "0");
   ctxInboxCount.textContent = `(${curCount + 1})`;
 }
 
-inboxSendBtn.addEventListener("click", sendInboxMessage);
-inboxInput.addEventListener("keydown", (e) => {
+chatSendBtn.addEventListener("click", sendInboxMessage);
+chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendInboxMessage();
   if (e.key === "Escape") closePromptPanel();
 });
@@ -1649,16 +1730,18 @@ function handleInboxUpdate(data) {
   const agent = state.agents.get(panelAgentId);
   if (!agent?.teamName || agent.teamName !== data.teamName) return;
 
-  const agentName = agent.label || panelAgentId.split("@")[0];
+  // Fix: use teamMemberName for matching — data.agentName is the member name from server
+  const agentName = agent.teamMemberName || agent.label || panelAgentId.split("@")[0];
   if (data.agentName !== agentName && data.agentName !== panelAgentId) return;
 
-  // Append new messages
+  // Append new messages to both context inbox and chat messages
   if (data.newMessages) {
-    const emptyMsg = ctxInbox.querySelector(".inbox-empty");
-    if (emptyMsg) emptyMsg.remove();
+    const emptyMsgCtx = ctxInbox.querySelector(".inbox-empty");
+    if (emptyMsgCtx) emptyMsgCtx.remove();
+    const emptyMsgChat = chatMessages.querySelector(".inbox-empty");
+    if (emptyMsgChat) emptyMsgChat.remove();
 
     for (const msg of data.newMessages) {
-      const el = document.createElement("div");
       let text = msg.text || "";
       let isStructured = false;
       try {
@@ -1666,20 +1749,79 @@ function handleInboxUpdate(data) {
         if (parsed.type) { isStructured = true; text = `[${parsed.type}] ${parsed.reason || parsed.from || ""}`; }
       } catch {}
 
-      const isFromSelf = msg.from === "observer";
-      el.className = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
+      const isFromSelf = msg.from === "observer" || msg.from === "swarm-observer";
+      const cls = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
       const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      el.innerHTML = `
+      const html = `
         <span class="inbox-time">${time}</span>
         <span class="inbox-from" style="color:${isFromSelf ? "#7b68ee" : "#06d6a0"}">${msg.from || "?"}</span>
-        ${typeof text === "string" ? text.substring(0, 300) : JSON.stringify(text).substring(0, 300)}
+        ${typeof text === "string" ? escHtml(text.substring(0, 300)) : escHtml(JSON.stringify(text).substring(0, 300))}
       `;
-      ctxInbox.appendChild(el);
+
+      // Context tab inbox
+      const ctxEl = document.createElement("div");
+      ctxEl.className = cls;
+      ctxEl.innerHTML = html;
+      ctxInbox.appendChild(ctxEl);
+
+      // Message tab chat
+      const chatEl = document.createElement("div");
+      chatEl.className = cls;
+      chatEl.innerHTML = html;
+      chatMessages.appendChild(chatEl);
     }
     ctxInbox.scrollTop = ctxInbox.scrollHeight;
+    chatMessages.scrollTop = chatMessages.scrollHeight;
     ctxInboxCount.textContent = `(${data.totalCount || "?"})`;
   }
 }
+
+// ── Message tab: open and populate chat ────────────────────
+function openMessageTab(agentId) {
+  if (!agentId) return;
+  const agent = state.agents.get(agentId);
+  if (!agent) return;
+
+  panelAgentId = agentId;
+
+  // Populate chat header
+  chatDot.style.background = agent.color || "#4a4a60";
+  chatDot.style.color = agent.color || "#4a4a60";
+  chatAgentName.textContent = agent.teamMemberName || agent.label || agentId;
+  chatTeamName.textContent = agent.teamName ? `team: ${agent.teamName}` : "";
+
+  // Clear and reload chat messages from context inbox (they share the same data)
+  chatMessages.innerHTML = "";
+
+  if (!agent.teamName) {
+    chatMessages.innerHTML = '<div class="inbox-empty">This agent is not part of an agent team</div>';
+    chatInput.disabled = true;
+    chatSendBtn.disabled = true;
+  } else {
+    chatInput.disabled = false;
+    chatSendBtn.disabled = false;
+
+    // Copy current inbox messages from context tab to chat
+    const inboxMsgs = ctxInbox.querySelectorAll(".inbox-msg");
+    if (inboxMsgs.length === 0) {
+      chatMessages.innerHTML = '<div class="inbox-empty">No messages yet — start a conversation</div>';
+    } else {
+      for (const msg of inboxMsgs) {
+        chatMessages.appendChild(msg.cloneNode(true));
+      }
+    }
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  // Switch to message tab
+  switchTab("message");
+  chatInput.focus();
+}
+
+// Wire up "Message" button in context header
+ctxMsgBtn.addEventListener("click", () => {
+  if (panelAgentId) openMessageTab(panelAgentId);
+});
 
 // ── CWD helpers (for session tab) ─────────────────────────
 function getDefaultCwd() {
