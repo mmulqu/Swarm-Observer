@@ -264,10 +264,10 @@
   }
   #prompt-cwd-browse:hover { border-color: #3a3a5a; color: #8a8aa0; }
   .cwd-dropdown {
-    position: absolute; bottom: 100%; left: 0; right: 0;
+    position: fixed; left: 16px; right: 336px;
     background: #0a0a16; border: 1px solid #1a1a3a;
     border-radius: 4px; max-height: 150px; overflow-y: auto;
-    z-index: 50; margin-bottom: 2px;
+    z-index: 100; box-shadow: 0 -4px 16px rgba(0,0,0,0.5);
   }
   .cwd-dropdown-item {
     padding: 6px 12px; font-size: 11px; color: #7a7a98;
@@ -291,20 +291,28 @@
   #prompt-output .out-status { color: #ffd166; font-style: italic; font-size: 11px; }
 
   .prompt-permissions {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 16px;
-    background: #12122a;
-    border-top: 1px solid #1a1a3a;
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 16px;
+    background: #14122a;
+    border-top: 2px solid #ffd16640;
     flex-shrink: 0;
   }
   .prompt-permissions.hidden { display: none; }
   .prompt-permissions #prompt-perm-text {
     flex: 1; font-size: 11px; color: #ffd166;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    max-height: 120px; overflow-y: auto;
+  }
+  .perm-buttons {
+    display: flex; gap: 6px; flex-shrink: 0; align-items: center;
   }
   .perm-btn {
-    padding: 4px 12px; border-radius: 4px;
-    font: 11px/1 'JetBrains Mono', monospace;
-    cursor: pointer; border: 1px solid; transition: all 0.2s;
+    padding: 6px 16px; border-radius: 5px;
+    font: 12px/1 'JetBrains Mono', monospace;
+    font-weight: 700; cursor: pointer; border: 1px solid; transition: all 0.2s;
+  }
+  .perm-btn .perm-shortcut {
+    font-size: 9px; font-weight: 400; opacity: 0.5; margin-left: 4px;
   }
   .perm-yes { background: #06d6a022; border-color: #06d6a0; color: #06d6a0; }
   .perm-yes:hover { background: #06d6a044; }
@@ -333,8 +341,57 @@
     font: 13px/1 'JetBrains Mono', monospace;
     font-weight: 700; cursor: pointer; transition: all 0.2s;
   }
-  #prompt-send:hover { background: #08e8b0; }
+  #prompt-send:hover:not(:disabled) { background: #08e8b0; }
   #prompt-send:disabled { background: #1a1a3a; color: #3a3a50; cursor: default; }
+
+  /* Session state bar */
+  .session-state-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 16px; flex-shrink: 0;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid #14142a;
+    background: #08081a;
+  }
+  .session-state-bar.state-idle { color: #4a4a60; }
+  .session-state-bar.state-starting { color: #ffa94d; }
+  .session-state-bar.state-running { color: #06d6a0; }
+  .session-state-bar.state-ended { color: #4a4a60; }
+  .session-state-bar.state-error { color: #ef476f; }
+  .session-state-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; flex-shrink: 0;
+  }
+  .session-state-bar.state-starting .session-state-dot,
+  .session-state-bar.state-running .session-state-dot {
+    animation: pulse 1.5s ease-in-out infinite;
+    box-shadow: 0 0 6px currentColor;
+  }
+
+  /* Loading spinner for session */
+  .session-spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid #1a1a3a; border-top-color: #ffa94d;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Output separator between prompt/response cycles */
+  .out-separator {
+    border: none; border-top: 1px solid #14142a;
+    margin: 12px 0; opacity: 0.5;
+  }
+
+  /* Retry button in output */
+  .out-retry-btn {
+    display: inline-block; margin-top: 6px;
+    background: #ef476f22; border: 1px solid #ef476f;
+    color: #ef476f; padding: 4px 12px; border-radius: 4px;
+    font: 10px/1 'JetBrains Mono', monospace;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .out-retry-btn:hover { background: #ef476f44; }
 
   /* Panel Tabs */
   .panel-tabs {
@@ -452,14 +509,68 @@
     box-shadow: 0 0 6px currentColor; flex-shrink: 0;
   }
   .chat-header .chat-agent-name { font-weight: 600; color: #d0d0dc; }
+  .chat-header .chat-agent-status {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px;
+    text-transform: uppercase; font-weight: 600;
+  }
   .chat-header .chat-team-name { font-size: 10px; color: #3a3a58; margin-left: auto; }
   .chat-messages {
     flex: 1; overflow-y: auto; padding: 12px 16px;
-    display: flex; flex-direction: column; gap: 6px;
+    display: flex; flex-direction: column; gap: 8px;
   }
-  .chat-messages .inbox-empty {
-    font-size: 11px; color: #2a2a40; text-align: center;
-    padding: 24px; font-style: italic;
+  .chat-empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; flex: 1; padding: 32px 24px;
+    color: #2a2a40; text-align: center; font-size: 12px;
+    font-style: italic; gap: 8px;
+  }
+  .chat-empty-state .chat-empty-hint {
+    font-size: 10px; color: #1e1e30; max-width: 220px; line-height: 1.5;
+  }
+  .chat-bubble {
+    max-width: 85%; padding: 8px 12px; border-radius: 8px;
+    font-size: 11px; line-height: 1.5; word-break: break-word;
+    animation: fadeSlide 0.3s ease;
+  }
+  .chat-bubble .chat-bubble-sender {
+    font-size: 9px; font-weight: 600; margin-bottom: 3px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .chat-bubble .chat-bubble-text { color: #c8c8d8; }
+  .chat-bubble .chat-bubble-meta {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 4px; font-size: 8px; color: #2a2a40;
+    justify-content: flex-end;
+  }
+  .chat-bubble .chat-bubble-status { font-size: 8px; }
+  .chat-bubble-sent {
+    align-self: flex-end;
+    background: #7b68ee18; border: 1px solid #7b68ee30;
+    border-radius: 8px 8px 2px 8px;
+  }
+  .chat-bubble-sent .chat-bubble-sender { color: #7b68ee; }
+  .chat-bubble-received {
+    align-self: flex-start;
+    background: #06d6a010; border: 1px solid #06d6a020;
+    border-radius: 8px 8px 8px 2px;
+  }
+  .chat-bubble-received .chat-bubble-sender { color: #06d6a0; }
+  .chat-bubble-system {
+    align-self: center; max-width: 90%;
+    background: #ffd16610; border: 1px solid #ffd16620;
+    border-radius: 6px; font-style: italic; color: #8a8a70;
+  }
+  .chat-bubble-system .chat-bubble-sender { color: #ffd166; }
+  .chat-bubble-delivery { color: #06d6a0; }
+  .chat-bubble-delivery.failed { color: #ef476f; }
+  .chat-bubble-delivery.pending { color: #ffd166; }
+  .panel-tab .tab-badge {
+    display: inline-block; min-width: 14px; height: 14px;
+    padding: 0 4px; border-radius: 7px;
+    background: #ef476f; color: #fff;
+    font-size: 8px; font-weight: 700; line-height: 14px;
+    text-align: center; margin-left: 4px;
+    animation: fadeSlide 0.3s ease;
   }
   .chat-input-row {
     display: flex; gap: 8px; padding: 10px 16px;
@@ -615,11 +726,16 @@
       <div class="chat-container">
         <div class="chat-header" id="chat-header">
           <div class="chat-agent-dot" id="chat-dot"></div>
-          <span class="chat-agent-name" id="chat-agent-name">—</span>
+          <span class="chat-agent-name" id="chat-agent-name">--</span>
+          <span class="chat-agent-status" id="chat-agent-status"></span>
           <span class="chat-team-name" id="chat-team-name"></span>
         </div>
         <div class="chat-messages" id="chat-messages">
-          <div class="inbox-empty">Select an agent to start messaging</div>
+          <div class="chat-empty-state">
+            <div style="font-size:20px;opacity:0.3">&#x2709;</div>
+            <div>Click an agent node to start messaging</div>
+            <div class="chat-empty-hint">Messages are delivered via the Agent Teams inbox file protocol</div>
+          </div>
         </div>
         <div class="chat-input-row">
           <input id="chat-input" type="text" placeholder="Send a message…" autocomplete="off" />
@@ -630,6 +746,10 @@
 
     <!-- TAB: Session (original prompt panel) -->
     <div class="panel-tab-content" id="tab-session">
+      <div class="session-state-bar state-idle" id="session-state-bar">
+        <div class="session-state-dot"></div>
+        <span id="session-state-text">Ready — enter a prompt to start</span>
+      </div>
       <div class="prompt-cwd-bar">
         <span class="cwd-label">cwd</span>
         <input id="prompt-cwd" type="text" spellcheck="false" placeholder="working directory…" />
@@ -638,13 +758,15 @@
       <div id="prompt-output"></div>
       <div id="prompt-permissions" class="prompt-permissions hidden">
         <span id="prompt-perm-text">Allow this tool?</span>
-        <button class="perm-btn perm-yes" data-response="y">✓ Yes</button>
-        <button class="perm-btn perm-no" data-response="n">✗ No</button>
-        <button class="perm-btn perm-always" data-response="Y">✓ Always</button>
+        <div class="perm-buttons">
+          <button class="perm-btn perm-yes" data-response="y">Yes<span class="perm-shortcut">(y)</span></button>
+          <button class="perm-btn perm-no" data-response="n">No<span class="perm-shortcut">(n)</span></button>
+          <button class="perm-btn perm-always" data-response="Y">Always<span class="perm-shortcut">(a)</span></button>
+        </div>
       </div>
       <div class="prompt-input-row">
-        <input id="prompt-input" type="text" placeholder="Send a prompt to Claude…" autocomplete="off" />
-        <button id="prompt-send">→</button>
+        <input id="prompt-input" type="text" placeholder="Enter a prompt to start a new session…" autocomplete="off" />
+        <button id="prompt-send" disabled>Send</button>
       </div>
     </div>
   </div>
@@ -1388,7 +1510,7 @@ function connect() {
           break;
 
         case "inbox_message_sent":
-          // Confirmation that our message was written
+          if (typeof handleInboxMessageSent === "function") handleInboxMessageSent(data);
           break;
 
         case "session_started":
@@ -1495,10 +1617,12 @@ const tabSession = document.getElementById("tab-session");
 const chatHeader = document.getElementById("chat-header");
 const chatDot = document.getElementById("chat-dot");
 const chatAgentName = document.getElementById("chat-agent-name");
+const chatAgentStatus = document.getElementById("chat-agent-status");
 const chatTeamName = document.getElementById("chat-team-name");
 const chatMessages = document.getElementById("chat-messages");
 const chatInput = document.getElementById("chat-input");
 const chatSendBtn = document.getElementById("chat-send");
+let chatUnreadCount = 0;
 const ctxMsgBtn = document.getElementById("ctx-msg-btn");
 const ctxDot = document.getElementById("ctx-dot");
 const ctxName = document.getElementById("ctx-name");
@@ -1516,6 +1640,29 @@ let sessionRunning = false;
 let serverCwd = "";
 let panelAgentId = null; // which agent the panel is focused on
 let teamsData = {};      // populated from snapshot
+let lastPromptText = ""; // for retry on error
+const sessionStateBar = document.getElementById("session-state-bar");
+const sessionStateText = document.getElementById("session-state-text");
+
+// Session state indicator
+function setSessionState(stateName, text) {
+  sessionStateBar.className = `session-state-bar state-${stateName}`;
+  sessionStateText.textContent = text;
+}
+
+// Enable/disable send button based on input content
+promptInput.addEventListener("input", () => {
+  document.getElementById("prompt-send").disabled = !promptInput.value.trim();
+});
+
+// Update placeholder based on session state
+function updatePromptPlaceholder() {
+  if (sessionRunning) {
+    promptInput.placeholder = "Type a response to the running session…";
+  } else {
+    promptInput.placeholder = "Enter a prompt to start a new session…";
+  }
+}
 
 // ── Tab switching ─────────────────────────────────────────
 function switchTab(tabName) {
@@ -1525,6 +1672,10 @@ function switchTab(tabName) {
   tabContext.classList.toggle("active", tabName === "context");
   tabMessage.classList.toggle("active", tabName === "message");
   tabSession.classList.toggle("active", tabName === "session");
+  // Clear unread badge when switching to message tab
+  if (tabName === "message" && typeof clearMessageBadge === "function") {
+    clearMessageBadge();
+  }
 }
 
 panelTabs.forEach(tab => {
@@ -1559,10 +1710,17 @@ function openPromptPanel(agentId, tab) {
       switchTab(tab || "session");
     }
   } else {
-    promptTitle.textContent = "🔮 New Claude Session";
+    promptTitle.textContent = "New Claude Session";
     if (!cwdInput.value) cwdInput.value = getDefaultCwd();
-    // No agent = open session tab
+    // No agent = open session tab with fresh state
     switchTab(tab || "session");
+    // Reset session state for fresh start
+    if (!sessionRunning) {
+      promptOutput.innerHTML = "";
+      setSessionState("idle", "Ready — enter a prompt to start");
+      updatePromptPlaceholder();
+      document.getElementById("prompt-send").disabled = true;
+    }
     // Clear context
     ctxName.textContent = "—";
     ctxRole.textContent = "";
@@ -1664,11 +1822,29 @@ function renderInboxMessages(messages) {
     el.innerHTML = `
       <span class="inbox-time">${time}</span>
       <span class="inbox-from" style="color:${isFromSelf ? "#7b68ee" : "#06d6a0"}">${msg.from || "?"}</span>
-      ${typeof text === "string" ? text.substring(0, 300) : JSON.stringify(text).substring(0, 300)}
+      ${typeof text === "string" ? escHtml(text.substring(0, 300)) : escHtml(JSON.stringify(text).substring(0, 300))}
     `;
     ctxInbox.appendChild(el);
   }
   ctxInbox.scrollTop = ctxInbox.scrollHeight;
+}
+
+// ── Helper: create a chat bubble element ──────────────────
+function createChatBubble(from, text, timestamp, type) {
+  const el = document.createElement("div");
+  const isSent = from === "observer" || from === "swarm-observer";
+  const isSystem = type === "system";
+  el.className = `chat-bubble ${isSystem ? "chat-bubble-system" : isSent ? "chat-bubble-sent" : "chat-bubble-received"}`;
+  const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  el.innerHTML = `
+    <div class="chat-bubble-sender">${escHtml(from || "?")}</div>
+    <div class="chat-bubble-text">${escHtml(typeof text === "string" ? text.substring(0, 500) : JSON.stringify(text).substring(0, 500))}</div>
+    <div class="chat-bubble-meta">
+      <span>${time}</span>
+      ${isSent ? '<span class="chat-bubble-status chat-bubble-delivery pending">sending...</span>' : ""}
+    </div>
+  `;
+  return el;
 }
 
 // ── Send inbox message (from Message tab chat input) ──────
@@ -1678,17 +1854,22 @@ function sendInboxMessage() {
   chatInput.value = "";
 
   const agent = state.agents.get(panelAgentId);
-  if (!agent?.teamName) {
+  if (!agent) return;
+
+  if (!agent.teamName) {
     const el = document.createElement("div");
-    el.className = "inbox-msg structured";
-    el.textContent = "This agent is not part of an agent team — inbox messaging unavailable.";
+    el.className = "chat-bubble chat-bubble-system";
+    el.innerHTML = `
+      <div class="chat-bubble-sender">system</div>
+      <div class="chat-bubble-text">This agent is not part of an agent team -- inbox messaging unavailable.</div>
+    `;
     chatMessages.appendChild(el);
     chatMessages.scrollTop = chatMessages.scrollHeight;
     return;
   }
 
-  // Fix: use teamMemberName (from config.json member.name) — not label which may be a task description
   const targetName = agent.teamMemberName || agent.label || panelAgentId.split("@")[0];
+  const msgId = "msg-" + Date.now();
 
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify({
@@ -1697,22 +1878,41 @@ function sendInboxMessage() {
       targetAgent: targetName,
       fromName: "observer",
       text,
+      _msgId: msgId,
     }));
+  } else {
+    const errEl = document.createElement("div");
+    errEl.className = "chat-bubble chat-bubble-system";
+    errEl.innerHTML = '<div class="chat-bubble-text">Not connected to server</div>';
+    chatMessages.appendChild(errEl);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return;
   }
 
-  // Optimistic UI update — append to chat messages
-  const el = document.createElement("div");
-  el.className = "inbox-msg from-self";
+  // Remove empty state if present
+  const emptyState = chatMessages.querySelector(".chat-empty-state");
+  if (emptyState) emptyState.remove();
+
+  // Optimistic UI: add sent bubble
+  const bubble = createChatBubble("observer", text, new Date().toISOString(), "sent");
+  bubble.dataset.msgId = msgId;
+  chatMessages.appendChild(bubble);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  // Also add to context tab inbox
+  const ctxEl = document.createElement("div");
+  ctxEl.className = "inbox-msg from-self";
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  el.innerHTML = `
+  ctxEl.innerHTML = `
     <span class="inbox-time">${time}</span>
     <span class="inbox-from" style="color:#7b68ee">observer</span>
     ${escHtml(text)}
   `;
-  chatMessages.appendChild(el);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
+  const emptyCtx = ctxInbox.querySelector(".inbox-empty");
+  if (emptyCtx) emptyCtx.remove();
+  ctxInbox.appendChild(ctxEl);
+  ctxInbox.scrollTop = ctxInbox.scrollHeight;
 
-  // Also update context tab inbox count
   const curCount = parseInt(ctxInboxCount.textContent.replace(/[()]/g, "") || "0");
   ctxInboxCount.textContent = `(${curCount + 1})`;
 }
@@ -1723,23 +1923,41 @@ chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closePromptPanel();
 });
 
+// ── Handle inbox_message_sent confirmation from server ─────
+function handleInboxMessageSent(data) {
+  // Update delivery status on sent bubbles
+  const bubbles = chatMessages.querySelectorAll(".chat-bubble-sent");
+  for (const bubble of bubbles) {
+    const statusEl = bubble.querySelector(".chat-bubble-status.pending");
+    if (statusEl) {
+      if (data.success !== false) {
+        statusEl.textContent = "delivered";
+        statusEl.className = "chat-bubble-status chat-bubble-delivery";
+      } else {
+        statusEl.textContent = "failed";
+        statusEl.className = "chat-bubble-status chat-bubble-delivery failed";
+      }
+    }
+  }
+}
+
 // ── Handle live inbox updates from server ─────────────────
 function handleInboxUpdate(data) {
-  // If the panel is open for this agent, append new messages
   if (!panelAgentId) return;
   const agent = state.agents.get(panelAgentId);
   if (!agent?.teamName || agent.teamName !== data.teamName) return;
 
-  // Fix: use teamMemberName for matching — data.agentName is the member name from server
   const agentName = agent.teamMemberName || agent.label || panelAgentId.split("@")[0];
   if (data.agentName !== agentName && data.agentName !== panelAgentId) return;
 
-  // Append new messages to both context inbox and chat messages
   if (data.newMessages) {
     const emptyMsgCtx = ctxInbox.querySelector(".inbox-empty");
     if (emptyMsgCtx) emptyMsgCtx.remove();
-    const emptyMsgChat = chatMessages.querySelector(".inbox-empty");
+    const emptyMsgChat = chatMessages.querySelector(".chat-empty-state");
     if (emptyMsgChat) emptyMsgChat.remove();
+
+    // Check if Message tab is currently active
+    const messageTabActive = tabMessage.classList.contains("active");
 
     for (const msg of data.newMessages) {
       let text = msg.text || "";
@@ -1750,30 +1968,61 @@ function handleInboxUpdate(data) {
       } catch {}
 
       const isFromSelf = msg.from === "observer" || msg.from === "swarm-observer";
-      const cls = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
+
+      // Context tab inbox (keep original .inbox-msg style)
+      const ctxEl = document.createElement("div");
+      const ctxCls = `inbox-msg ${isStructured ? "structured" : isFromSelf ? "from-self" : "from-other"}`;
       const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-      const html = `
+      ctxEl.className = ctxCls;
+      ctxEl.innerHTML = `
         <span class="inbox-time">${time}</span>
         <span class="inbox-from" style="color:${isFromSelf ? "#7b68ee" : "#06d6a0"}">${msg.from || "?"}</span>
         ${typeof text === "string" ? escHtml(text.substring(0, 300)) : escHtml(JSON.stringify(text).substring(0, 300))}
       `;
-
-      // Context tab inbox
-      const ctxEl = document.createElement("div");
-      ctxEl.className = cls;
-      ctxEl.innerHTML = html;
       ctxInbox.appendChild(ctxEl);
 
-      // Message tab chat
-      const chatEl = document.createElement("div");
-      chatEl.className = cls;
-      chatEl.innerHTML = html;
+      // Message tab chat (use chat bubble style)
+      const bubbleType = isStructured ? "system" : isFromSelf ? "sent" : "received";
+      const chatEl = createChatBubble(msg.from || "?", text, msg.timestamp, bubbleType);
+      // Mark delivered if it was from self
+      if (isFromSelf) {
+        const statusEl = chatEl.querySelector(".chat-bubble-status");
+        if (statusEl) { statusEl.textContent = "delivered"; statusEl.className = "chat-bubble-status chat-bubble-delivery"; }
+      }
       chatMessages.appendChild(chatEl);
+
+      // Track unread if message tab is not active and message is from someone else
+      if (!messageTabActive && !isFromSelf) {
+        chatUnreadCount++;
+        updateMessageBadge();
+      }
     }
     ctxInbox.scrollTop = ctxInbox.scrollHeight;
     chatMessages.scrollTop = chatMessages.scrollHeight;
     ctxInboxCount.textContent = `(${data.totalCount || "?"})`;
   }
+}
+
+// ── Unread badge management ───────────────────────────────
+function updateMessageBadge() {
+  const msgTab = document.querySelector('.panel-tab[data-tab="message"]');
+  if (!msgTab) return;
+  let badge = msgTab.querySelector(".tab-badge");
+  if (chatUnreadCount > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "tab-badge";
+      msgTab.appendChild(badge);
+    }
+    badge.textContent = chatUnreadCount > 99 ? "99+" : chatUnreadCount;
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+function clearMessageBadge() {
+  chatUnreadCount = 0;
+  updateMessageBadge();
 }
 
 // ── Message tab: open and populate chat ────────────────────
@@ -1784,36 +2033,75 @@ function openMessageTab(agentId) {
 
   panelAgentId = agentId;
 
-  // Populate chat header
+  // Populate chat header with agent info and status
   chatDot.style.background = agent.color || "#4a4a60";
   chatDot.style.color = agent.color || "#4a4a60";
   chatAgentName.textContent = agent.teamMemberName || agent.label || agentId;
   chatTeamName.textContent = agent.teamName ? `team: ${agent.teamName}` : "";
 
-  // Clear and reload chat messages from context inbox (they share the same data)
+  // Show agent status
+  const agentStatus = agent.status || "idle";
+  chatAgentStatus.textContent = agentStatus;
+  chatAgentStatus.style.background = statusColor(agentStatus) + "20";
+  chatAgentStatus.style.color = statusColor(agentStatus);
+
+  // Clear and reload chat messages
   chatMessages.innerHTML = "";
 
   if (!agent.teamName) {
-    chatMessages.innerHTML = '<div class="inbox-empty">This agent is not part of an agent team</div>';
+    chatMessages.innerHTML = `
+      <div class="chat-empty-state">
+        <div style="font-size:20px;opacity:0.3">&#x26A0;</div>
+        <div>This agent is not part of an agent team</div>
+        <div class="chat-empty-hint">Only agents in a team with an inbox file can receive messages</div>
+      </div>
+    `;
     chatInput.disabled = true;
     chatSendBtn.disabled = true;
   } else {
     chatInput.disabled = false;
     chatSendBtn.disabled = false;
 
-    // Copy current inbox messages from context tab to chat
+    // Convert context tab inbox messages to chat bubbles
     const inboxMsgs = ctxInbox.querySelectorAll(".inbox-msg");
     if (inboxMsgs.length === 0) {
-      chatMessages.innerHTML = '<div class="inbox-empty">No messages yet — start a conversation</div>';
+      chatMessages.innerHTML = `
+        <div class="chat-empty-state">
+          <div style="font-size:20px;opacity:0.3">&#x2709;</div>
+          <div>No messages yet</div>
+          <div class="chat-empty-hint">Send a message to start a conversation with ${escHtml(agent.teamMemberName || agent.label || "this agent")}</div>
+        </div>
+      `;
     } else {
       for (const msg of inboxMsgs) {
-        chatMessages.appendChild(msg.cloneNode(true));
+        const fromEl = msg.querySelector(".inbox-from");
+        const timeEl = msg.querySelector(".inbox-time");
+        const from = fromEl ? fromEl.textContent : "?";
+        const isFromSelf = msg.classList.contains("from-self");
+        const isStructured = msg.classList.contains("structured");
+        // Extract text content (everything after the from span)
+        let textContent = msg.textContent.replace(fromEl ? fromEl.textContent : "", "").replace(timeEl ? timeEl.textContent : "", "").trim();
+        const bubbleType = isStructured ? "system" : isFromSelf ? "sent" : "received";
+        const bubble = createChatBubble(from, textContent, null, bubbleType);
+        // Set time from original
+        if (timeEl) {
+          const metaEl = bubble.querySelector(".chat-bubble-meta span");
+          if (metaEl) metaEl.textContent = timeEl.textContent;
+        }
+        // Mark sent messages as delivered (they came from server state)
+        if (isFromSelf) {
+          const statusEl = bubble.querySelector(".chat-bubble-status");
+          if (statusEl) { statusEl.textContent = "delivered"; statusEl.className = "chat-bubble-status chat-bubble-delivery"; }
+        }
+        chatMessages.appendChild(bubble);
       }
     }
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // Switch to message tab
+  // Clear unread badge when opening message tab
+  clearMessageBadge();
+
   switchTab("message");
   chatInput.focus();
 }
@@ -1845,6 +2133,7 @@ function getKnownCwds() {
 }
 
 function showCwdDropdown() {
+  // Remove any existing dropdown first
   document.querySelectorAll(".cwd-dropdown").forEach(el => el.remove());
   const cwds = getKnownCwds();
   if (cwds.size === 0) return;
@@ -1854,20 +2143,28 @@ function showCwdDropdown() {
   for (const [dir, label] of cwds) {
     const item = document.createElement("div");
     item.className = "cwd-dropdown-item";
-    item.innerHTML = `${dir.replace(/\\/g, "/")}<span class="cwd-agent-name">${label}</span>`;
-    item.addEventListener("click", () => { cwdInput.value = dir; dropdown.remove(); });
+    item.innerHTML = `${escHtml(dir.replace(/\\/g, "/"))}<span class="cwd-agent-name">${escHtml(label)}</span>`;
+    item.addEventListener("click", () => {
+      cwdInput.value = dir;
+      dropdown.remove();
+    });
     dropdown.appendChild(item);
   }
+
+  // Position dropdown above the CWD bar using fixed positioning
   const bar = cwdInput.closest(".prompt-cwd-bar");
-  bar.style.position = "relative";
-  bar.appendChild(dropdown);
-  setTimeout(() => {
-    document.addEventListener("click", function closeDropdown(e) {
-      if (!dropdown.contains(e.target) && e.target !== cwdBrowse) {
-        dropdown.remove(); document.removeEventListener("click", closeDropdown);
-      }
-    });
-  }, 10);
+  const barRect = bar.getBoundingClientRect();
+  dropdown.style.bottom = (window.innerHeight - barRect.top + 2) + "px";
+  document.body.appendChild(dropdown);
+
+  // Close on outside click
+  function closeDropdown(e) {
+    if (!dropdown.contains(e.target) && e.target !== cwdBrowse) {
+      dropdown.remove();
+      document.removeEventListener("click", closeDropdown);
+    }
+  }
+  setTimeout(() => document.addEventListener("click", closeDropdown), 10);
 }
 cwdBrowse.addEventListener("click", showCwdDropdown);
 
@@ -1879,9 +2176,13 @@ function closePromptPanel() {
   }
   activeSessionTag = null;
   sessionRunning = false;
+  sessionHasOutput = false;
   panelAgentId = null;
   promptOutput.innerHTML = "";
   promptPerms.classList.add("hidden");
+  setSessionState("idle", "Ready — enter a prompt to start");
+  updatePromptPlaceholder();
+  document.getElementById("prompt-send").disabled = true;
   document.querySelectorAll(".cwd-dropdown").forEach(el => el.remove());
 }
 
@@ -1902,19 +2203,31 @@ function sendPrompt() {
   const text = promptInput.value.trim();
   if (!text) return;
   promptInput.value = "";
+  document.getElementById("prompt-send").disabled = true;
 
   if (!sessionRunning) {
+    // Starting a new session
+    lastPromptText = text;
     const cwd = cwdInput.value.trim() || undefined;
-    appendOutput(`▸ ${text}`, "out-user");
-    appendOutput(`Starting Claude session${cwd ? " in " + cwd : ""}…`, "out-status");
+
+    // Add separator if there's existing output
+    if (promptOutput.children.length > 0) {
+      promptOutput.appendChild(document.createElement("hr")).className = "out-separator";
+    }
+
+    appendOutput(`> ${text}`, "out-user");
+    setSessionState("starting", "Starting session…");
 
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ type: "prompt", text, cwd }));
     } else {
       appendOutput("Not connected to server", "out-error");
+      setSessionState("error", "Not connected to server");
     }
+    updatePromptPlaceholder();
   } else {
-    appendOutput(`▸ ${text}`, "out-user");
+    // Responding to a running session
+    appendOutput(`> ${text}`, "out-user");
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ type: "respond", sessionTag: activeSessionTag, text }));
     }
@@ -1926,48 +2239,107 @@ function sendPermission(response) {
     ws.send(JSON.stringify({ type: "respond", sessionTag: activeSessionTag, text: response }));
   }
   promptPerms.classList.add("hidden");
-  appendOutput(`  → ${response === "y" ? "Approved" : response === "n" ? "Denied" : "Approved (always)"}`, "out-status");
+  const label = response === "y" ? "Approved" : response === "n" ? "Denied" : "Approved (always)";
+  appendOutput(`  [${label}]`, "out-status");
 }
+
+// Better ANSI stripping — covers more escape sequences
+function stripAnsi(text) {
+  return text
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")   // CSI sequences (colors, cursor moves)
+    .replace(/\x1b\][^\x07]*\x07/g, "")        // OSC sequences (title changes)
+    .replace(/\x1b\([A-Z0-9]/g, "")            // character set selection
+    .replace(/\x1b[=>]/g, "")                   // keypad mode
+    .replace(/\x1b\[?[0-9;]*[hl]/g, "")        // mode set/reset
+    .replace(/\r\n/g, "\n")                     // normalize line endings
+    .replace(/\r/g, "");                        // leftover carriage returns
+}
+
+let sessionHasOutput = false; // track if we got any output since session_started
 
 function handleSessionMessage(data) {
   switch (data.type) {
     case "session_started":
       activeSessionTag = data.sessionTag;
       sessionRunning = true;
-      promptTitle.textContent = `🔮 Session ${data.sessionTag.substring(0, 8)}`;
+      sessionHasOutput = false;
+      promptTitle.textContent = `Session ${data.sessionTag.substring(0, 8)}`;
+      setSessionState("starting", "Starting session — waiting for Claude…");
       if (data.cwd) {
         cwdInput.value = data.cwd;
-        appendOutput(`📁 ${data.cwd}`, "out-system");
+        appendOutput(`cwd: ${data.cwd}`, "out-system");
       }
-      appendOutput("Session started — waiting for Claude…", "out-status");
+      updatePromptPlaceholder();
       break;
 
     case "session_output":
       if (data.sessionTag !== activeSessionTag) return;
-      const cleaned = data.text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\r/g, "");
+
+      // First output received — switch from starting to running
+      if (!sessionHasOutput) {
+        sessionHasOutput = true;
+        setSessionState("running", "Session running");
+      }
+
+      const cleaned = stripAnsi(data.text);
       if (cleaned.trim()) {
         const cls = data.isError ? "out-error" : data.needsPermission ? "out-tool" : "out-assistant";
         appendOutput(cleaned, cls);
       }
       if (data.needsPermission) {
+        // Show the full permission text, not just last 80 chars
         const lines = cleaned.trim().split("\n");
-        promptPermText.textContent = lines[lines.length - 1].substring(0, 80);
+        // Collect all relevant permission lines (often multi-line)
+        const permLines = [];
+        for (let i = lines.length - 1; i >= 0 && permLines.length < 10; i--) {
+          if (lines[i].trim()) permLines.unshift(lines[i]);
+          else if (permLines.length > 0) break; // stop at first blank line above
+        }
+        promptPermText.textContent = permLines.join("\n");
         promptPerms.classList.remove("hidden");
+        promptOutput.scrollTop = promptOutput.scrollHeight;
       }
       break;
 
-    case "session_ended":
+    case "session_ended": {
       if (data.sessionTag !== activeSessionTag) return;
       sessionRunning = false;
-      appendOutput(`\nSession ended (exit code: ${data.exitCode})`, "out-status");
+      const code = data.exitCode;
+      const stateText = code === 0 ? "Session ended successfully" : `Session ended (exit code: ${code})`;
+      setSessionState("ended", stateText);
+      appendOutput(`\n${stateText}`, "out-status");
       promptPerms.classList.add("hidden");
+      updatePromptPlaceholder();
       break;
+    }
 
-    case "session_error":
+    case "session_error": {
       if (data.sessionTag && data.sessionTag !== activeSessionTag) return;
-      appendOutput(`Error: ${data.error}`, "out-error");
       sessionRunning = false;
+      const errMsg = data.error || "Unknown error";
+      setSessionState("error", `Error: ${errMsg}`);
+      appendOutput(`Error: ${errMsg}`, "out-error");
+
+      // Add retry button
+      if (lastPromptText) {
+        const retryDiv = document.createElement("div");
+        const retryBtn = document.createElement("button");
+        retryBtn.className = "out-retry-btn";
+        retryBtn.textContent = "Retry last prompt";
+        retryBtn.addEventListener("click", () => {
+          promptInput.value = lastPromptText;
+          document.getElementById("prompt-send").disabled = false;
+          promptInput.focus();
+        });
+        retryDiv.appendChild(retryBtn);
+        promptOutput.appendChild(retryDiv);
+        promptOutput.scrollTop = promptOutput.scrollHeight;
+      }
+
+      promptPerms.classList.add("hidden");
+      updatePromptPlaceholder();
       break;
+    }
   }
 }
 
@@ -1984,6 +2356,19 @@ promptInput.addEventListener("keydown", (e) => {
 for (const btn of document.querySelectorAll(".perm-btn")) {
   btn.addEventListener("click", () => sendPermission(btn.dataset.response));
 }
+
+// Keyboard shortcuts for permission prompts (y/n/a)
+document.addEventListener("keydown", (e) => {
+  // Only handle when permission bar is visible and session tab is active
+  if (promptPerms.classList.contains("hidden")) return;
+  if (!tabSession.classList.contains("active")) return;
+  // Don't capture if an input/textarea is focused
+  if (document.activeElement && (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")) return;
+
+  if (e.key === "y") { e.preventDefault(); sendPermission("y"); }
+  else if (e.key === "n") { e.preventDefault(); sendPermission("n"); }
+  else if (e.key === "a") { e.preventDefault(); sendPermission("Y"); }
+});
 
 </script>
 </body>

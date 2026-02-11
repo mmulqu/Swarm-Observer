@@ -114,13 +114,47 @@ wss.on("connection", (ws) => {
     } else if (msg.type === "send_inbox_message") {
       // Write a message to a teammate's inbox file
       const { teamName, targetAgent, fromName, text } = msg;
-      if (teamName && targetAgent && text) {
-        const result = writeInboxMessage(teamName, targetAgent, fromName || "observer", text);
-        if (result) {
+      if (!teamName || !targetAgent || !text) {
+        ws.send(JSON.stringify({
+          type: "inbox_message_error",
+          error: "Missing required fields: teamName, targetAgent, and text are required",
+        }));
+      } else {
+        // Validate team exists
+        const team = teamsState.get(teamName);
+        if (!team) {
           ws.send(JSON.stringify({
-            type: "inbox_message_sent",
-            teamName, targetAgent, message: result,
+            type: "inbox_message_error",
+            error: `Team "${teamName}" not found`,
+            teamName,
           }));
+        } else {
+          // Validate target agent is a member of the team
+          const memberNames = (team.config.members || []).map(m => m.name);
+          const memberIds = (team.config.members || []).map(m => m.agentId);
+          const isValidMember = memberNames.includes(targetAgent) || memberIds.includes(targetAgent);
+          if (!isValidMember) {
+            ws.send(JSON.stringify({
+              type: "inbox_message_error",
+              error: `Agent "${targetAgent}" is not a member of team "${teamName}"`,
+              teamName, targetAgent,
+              validMembers: memberNames,
+            }));
+          } else {
+            const result = writeInboxMessage(teamName, targetAgent, fromName || "observer", text);
+            if (result) {
+              ws.send(JSON.stringify({
+                type: "inbox_message_sent",
+                teamName, targetAgent, message: result,
+              }));
+            } else {
+              ws.send(JSON.stringify({
+                type: "inbox_message_error",
+                error: "Failed to write inbox message (file system error)",
+                teamName, targetAgent,
+              }));
+            }
+          }
         }
       }
     } else if (msg.type === "get_agent_context") {
@@ -186,28 +220,44 @@ function spawnClaudeSession(ws, msg) {
   const prompt = msg.text || "";
   const resumeId = msg.resumeSessionId || null;
 
-  // Build command args
-  const args = [];
+  // Build command args — use --output-format stream-json so Claude produces
+  // streaming output even when stdout is not a TTY (piped from Node spawn).
+  const args = ["--output-format", "stream-json"];
   if (resumeId) {
     args.push("--resume", resumeId);
   } else {
     args.push("-p", prompt);
   }
-  // Don't use --json — it changes the output format too much.
-  // Instead we'll just stream the raw terminal output.
-  // Don't auto-approve — let the user decide in the UI.
 
   console.log(`  🚀 Spawning Claude session [${tag}] in ${cwd}`);
-  console.log(`     Args: claude ${args.join(" ").substring(0, 80)}...`);
+  console.log(`     Prompt: ${prompt.substring(0, 100)}...`);
 
   let proc;
   try {
-    proc = spawn("claude", args, {
-      cwd,
-      shell: true,
-      env: { ...process.env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    // On Windows with shell:true, args with spaces get split at word boundaries
+    // because cmd.exe just concatenates them. Build a quoted command string.
+    const isWin = process.platform === "win32";
+    if (isWin) {
+      const quotedArgs = args.map(a =>
+        a.includes(" ") || a.includes('"') || a.includes("!") || a.includes("&")
+          ? `"${a.replace(/"/g, '\\"')}"` : a
+      );
+      const cmdStr = `claude ${quotedArgs.join(" ")}`;
+      console.log(`     Cmd: ${cmdStr.substring(0, 120)}...`);
+      proc = spawn(cmdStr, [], {
+        cwd,
+        shell: true,
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } else {
+      proc = spawn("claude", args, {
+        cwd,
+        shell: true,
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    }
   } catch (e) {
     ws.send(JSON.stringify({
       type: "session_error",
@@ -217,7 +267,8 @@ function spawnClaudeSession(ws, msg) {
     return;
   }
 
-  managedProcesses.set(tag, { proc, ws, buffer: "", startTime: Date.now() });
+  console.log(`     PID: ${proc.pid}`);
+  managedProcesses.set(tag, { proc, ws, buffer: "", lineBuffer: "", startTime: Date.now() });
 
   // Notify UI that session started
   ws.send(JSON.stringify({
@@ -227,52 +278,194 @@ function spawnClaudeSession(ws, msg) {
     prompt: prompt.substring(0, 200),
   }));
 
-  // Stream stdout to the UI
-  proc.stdout.on("data", (chunk) => {
-    const text = chunk.toString();
+  // Helper: safely send to the client WS (may have disconnected)
+  // WebSocket readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+  function safeSend(data) {
     const session = managedProcesses.get(tag);
-    if (session) session.buffer += text;
+    const targetWs = session?.ws || ws;
+    try {
+      if (targetWs.readyState === 1) {
+        targetWs.send(JSON.stringify(data));
+      } else {
+        const stateNames = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
+        const stateName = stateNames[targetWs.readyState] || `UNKNOWN(${targetWs.readyState})`;
+        console.log(`  ⚠ Cannot send to client for session [${tag}]: WebSocket is ${stateName}`);
+      }
+    } catch (e) {
+      console.log(`  ⚠ Failed to send to client for session [${tag}]: ${e.message}`);
+    }
+  }
 
-    // Detect permission prompts
-    const needsPermission = /(?:Allow|Approve|permit).*\?\s*\[([YyNnAa/]+)\]/i.test(text) ||
-                            /Do you want to proceed/i.test(text);
+  // Track whether we've received any output
+  let gotOutput = false;
 
-    ws.send(JSON.stringify({
-      type: "session_output",
-      sessionTag: tag,
-      text,
-      needsPermission,
-    }));
+  // Parse stream-json output: each line is a JSON object with type/content
+  function parseStreamJson(text) {
+    const lines = text.split("\n").filter(l => l.trim());
+    const parts = [];
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line);
+        // stream-json emits objects like: {"type":"assistant","content":"..."} or {"type":"result","result":"..."}
+        if (obj.type === "assistant" && obj.content) {
+          parts.push({ text: obj.content, cls: "assistant" });
+        } else if (obj.type === "result" && obj.result) {
+          parts.push({ text: obj.result, cls: "assistant" });
+        } else if (obj.type === "tool_use" || obj.type === "tool_result") {
+          const toolName = obj.name || obj.tool_name || "";
+          const toolInput = obj.input ? JSON.stringify(obj.input).substring(0, 200) : "";
+          parts.push({ text: `[${toolName}] ${toolInput}`, cls: "tool" });
+        } else if (obj.type === "error") {
+          parts.push({ text: obj.error?.message || JSON.stringify(obj), cls: "error" });
+        } else {
+          // Fallback: just show the raw line
+          parts.push({ text: line.substring(0, 500), cls: "system" });
+        }
+      } catch {
+        // Not JSON — emit raw text
+        if (line.trim()) parts.push({ text: line, cls: "system" });
+      }
+    }
+    return parts;
+  }
+
+  // Stream stdout to the UI — buffer partial lines across chunks
+  proc.stdout.on("data", (chunk) => {
+    const raw = chunk.toString();
+    gotOutput = true;
+
+    const session = managedProcesses.get(tag);
+    if (session) session.buffer += raw;
+
+    console.log(`  📤 [${tag}] stdout (${raw.length} chars): ${raw.substring(0, 100).replace(/\n/g, "\\n")}...`);
+
+    // Accumulate into line buffer, only process complete lines (ending in \n)
+    if (session) session.lineBuffer = (session.lineBuffer || "") + raw;
+    const lb = session ? session.lineBuffer : raw;
+    const lastNewline = lb.lastIndexOf("\n");
+    if (lastNewline === -1) {
+      // No complete line yet — wait for more data
+      return;
+    }
+    // Split into complete lines and leftover partial
+    const completeText = lb.substring(0, lastNewline);
+    if (session) session.lineBuffer = lb.substring(lastNewline + 1);
+
+    // Parse stream-json and forward readable text to the UI
+    const parts = parseStreamJson(completeText);
+    for (const part of parts) {
+      // Detect permission prompts
+      const needsPermission = /(?:Allow|Approve|permit).*\?/i.test(part.text) ||
+                              /Do you want to (?:proceed|allow)/i.test(part.text) ||
+                              /\b(?:Y\/n|yes\/no)\b/i.test(part.text) ||
+                              /\bProceed\s*\?/i.test(part.text) ||
+                              /\bapprove\b/i.test(part.text) ||
+                              /(?:tool|action|operation)\s+(?:approval|permission)/i.test(part.text);
+
+      safeSend({
+        type: "session_output",
+        sessionTag: tag,
+        text: part.text,
+        needsPermission,
+        isError: part.cls === "error",
+      });
+    }
+
+    // If no parts were parsed (e.g. non-JSON text), send raw complete lines
+    if (parts.length === 0 && completeText.trim()) {
+      safeSend({
+        type: "session_output",
+        sessionTag: tag,
+        text: completeText,
+      });
+    }
   });
 
   proc.stderr.on("data", (chunk) => {
-    ws.send(JSON.stringify({
+    const text = chunk.toString();
+    gotOutput = true;
+    console.log(`  📤 [${tag}] stderr (${text.length} chars): ${text.substring(0, 100).replace(/\n/g, "\\n")}...`);
+    safeSend({
       type: "session_output",
       sessionTag: tag,
-      text: chunk.toString(),
+      text,
       isError: true,
-    }));
+    });
   });
 
   proc.on("close", (code) => {
     console.log(`  ⏹ Claude session [${tag}] exited with code ${code}`);
+    // Flush any remaining line buffer before ending
+    const session = managedProcesses.get(tag);
+    const remaining = session?.lineBuffer?.trim();
+    if (remaining) {
+      const parts = parseStreamJson(remaining);
+      for (const part of parts) {
+        safeSend({ type: "session_output", sessionTag: tag, text: part.text, isError: part.cls === "error" });
+      }
+      if (parts.length === 0) {
+        safeSend({ type: "session_output", sessionTag: tag, text: remaining });
+      }
+    }
     managedProcesses.delete(tag);
-    ws.send(JSON.stringify({
+    safeSend({
       type: "session_ended",
       sessionTag: tag,
       exitCode: code,
-    }));
+    });
   });
 
   proc.on("error", (err) => {
     console.log(`  ❌ Claude session [${tag}] error: ${err.message}`);
     managedProcesses.delete(tag);
-    ws.send(JSON.stringify({
+    safeSend({
       type: "session_error",
       sessionTag: tag,
       error: err.message,
-    }));
+    });
   });
+
+  // Diagnostic: check after 15s if process produced any output
+  setTimeout(() => {
+    if (!gotOutput && managedProcesses.has(tag)) {
+      const isAlive = !proc.killed && proc.exitCode === null;
+      console.log(`  ⚠ [${tag}] No output after 15s. PID ${proc.pid}, killed=${proc.killed}, exitCode=${proc.exitCode}, alive=${isAlive}`);
+
+      // On Windows, check if the PID is actually running via tasklist
+      if (isAlive && process.platform === "win32" && proc.pid) {
+        try {
+          const { execSync } = require("child_process");
+          const result = execSync(`tasklist /FI "PID eq ${proc.pid}" /NH`, { timeout: 5000, encoding: "utf8" });
+          const pidRunning = result.includes(String(proc.pid));
+          console.log(`  ⚠ [${tag}] tasklist check: PID ${proc.pid} ${pidRunning ? "is running" : "NOT FOUND"}`);
+          safeSend({
+            type: "session_output",
+            sessionTag: tag,
+            text: pidRunning
+              ? `[Swarm Observer] Waiting for Claude response... (process PID ${proc.pid} is running)`
+              : `[Swarm Observer] Process PID ${proc.pid} may have exited unexpectedly — check if 'claude' is installed and on PATH`,
+            isError: !pidRunning,
+          });
+        } catch {
+          safeSend({
+            type: "session_output",
+            sessionTag: tag,
+            text: `[Swarm Observer] Waiting for Claude response... (process PID ${proc.pid}, status unknown)`,
+            isError: false,
+          });
+        }
+      } else {
+        safeSend({
+          type: "session_output",
+          sessionTag: tag,
+          text: isAlive
+            ? `[Swarm Observer] Waiting for Claude response... (process PID ${proc.pid} is running)`
+            : `[Swarm Observer] Process PID ${proc.pid} appears to have exited (killed=${proc.killed}, exitCode=${proc.exitCode})`,
+          isError: !isAlive,
+        });
+      }
+    }
+  }, 15000);
 }
 
 function broadcast(data) {
