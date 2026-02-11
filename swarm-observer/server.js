@@ -464,6 +464,7 @@ function getOrCreateAgent(sessionId, extra = {}) {
       toolCalls: 0,
       firstSeen: Date.now(),
       cwd: extra.cwd || null,
+      _justCreated: true,
     });
 
     broadcast({ type: "agent_join", agent: knownAgents.get(sessionId) });
@@ -527,7 +528,22 @@ function processEvent(evt) {
   } else if (hookEvent === "session_start" || hookEvent === "SessionStart") {
     agent.status = "starting";
   } else if (hookEvent === "subagent_stop" || hookEvent === "SubagentStop") {
-    agent.status = "done";
+    // SubagentStop fires on the PARENT session — find the child and mark it done
+    for (const [id, a] of knownAgents) {
+      if (a.parentId === sessionId && a.status !== "done") {
+        a.status = "done";
+        broadcast({ type: "event", event: {
+          id: Math.random().toString(36).substr(2, 9),
+          agentId: id,
+          event: "SubagentStop",
+          tool: "",
+          file: "",
+          tokens: 0,
+          timestamp: Date.now(),
+        }, agentUpdate: a });
+        break;
+      }
+    }
   } else if (hookEvent === "task_done" || hookEvent === "TaskCompleted") {
     agent.status = "done";
   }
@@ -611,7 +627,10 @@ function processEvent(evt) {
   }
 
   // When a new agent appears, check if there's a pending task for it
-  if ((hookEvent === "session_start" || hookEvent === "SessionStart") && pendingTasks?.length) {
+  // Match on SessionStart OR first-ever event (transcript watcher only emits PostToolUse)
+  const isNewAgent = agent._justCreated && !agent._taskLabel;
+  delete agent._justCreated;
+  if ((hookEvent === "session_start" || hookEvent === "SessionStart" || isNewAgent) && pendingTasks?.length) {
     // Find most recent pending task from same cwd or within 10s
     const now = Date.now();
     const pending = pendingTasks.find(t =>
@@ -620,11 +639,17 @@ function processEvent(evt) {
     if (pending) {
       agent._taskLabel = pending.label;
       agent.label = pending.label;
+      agent.parentId = pending.from;
+
       // Update the message target now that we know the session id
       const msg = recentMessages.find(m =>
         m.from === pending.from && m.to === "subagent" && m.text === pending.label
       );
-      if (msg) msg.to = sessionId;
+      if (msg) {
+        msg.to = sessionId;
+        // Re-broadcast so client can create the correct edge
+        broadcast({ type: "message", message: msg });
+      }
 
       // Remove consumed task
       const idx = pendingTasks.indexOf(pending);

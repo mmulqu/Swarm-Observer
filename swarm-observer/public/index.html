@@ -1138,6 +1138,11 @@ function autoLink(agentId) {
   const agent = state.agents.get(agentId);
   if (!agent) return false;
 
+  // Connect to parent (Task delegation)
+  if (agent.parentId && state.agents.has(agent.parentId)) {
+    changed = ensureLink(agent.parentId, agentId, 0.3) || changed;
+  }
+
   // Connect to lead
   for (const [id, a] of state.agents) {
     if (a.role === "lead" && id !== agentId) {
